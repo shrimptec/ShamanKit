@@ -478,6 +478,97 @@ do
 	TotemRangeDB.distanceMode = "off"
 end
 
+-- ---- keeping a place open for an element: the gap (a dim placeholder) shows which totem is missing
+do
+	local holders = {}
+	for _, f in ipairs(frames) do if f.kind == "Frame" and f.icon and f.border and not f.name then holders[#holders + 1] = f end end
+	check(#holders == 4, "one placeholder per element")
+	local function X(f) return f.anchor and f.anchor[4] end
+	local function Y(f) return f.anchor and f.anchor[5] end
+	local function hit(slot) return _G["TotemRangeHit" .. slot] end
+	local gap = TotemRangeDB.size + TotemRangeDB.spacing
+	local function out() totems = {}; for slot = 1, 4 do fire("PLAYER_TOTEM_UPDATE", slot) end end
+	local function put(slot, name) totems[slot] = { name = name, start = t, dur = 300, icon = 8 }; fire("PLAYER_TOTEM_UPDATE", slot) end
+	TotemRangeDB.order = { 2, 1, 3, 4 }; TotemRangeDB.vertical = false; TotemRangeDB.distanceMode = "off"
+	secretMode = false; secretPos = false; inCombat = false; pos = { y = 0, x = 0, map = 1 }
+	fire("PLAYER_ENTERING_WORLD"); out()
+
+	-- off by default: nothing changes
+	TotemRangeDB.reserve = nil; ns.fixReserve()
+	put(1, "Searing Totem III")
+	check(not holders[1].shown and not holders[2].shown and not holders[3].shown and not holders[4].shown, "default: no placeholders")
+	check(X(btn(1)) == 0 and bar().w == TotemRangeDB.size, "default: a lone totem sits first, the bar is one icon wide")
+
+	-- reserve earth and air, fire is out
+	TotemRangeDB.reserve = { [2] = true, [4] = true }; ns.apply()
+	check(holders[2].shown and holders[4].shown and not holders[1].shown and not holders[3].shown, "earth and air reserved: their placeholders show, fire and water's do not")
+	check(X(holders[2]) == 0 and X(btn(1)) == gap and X(holders[4]) == 2 * gap, "...earth first, fire in its place, air third (water takes no space)")
+	check(bar().w == 3 * TotemRangeDB.size + 2 * TotemRangeDB.spacing, "...the bar is three icons wide")
+	check(hit(1).mouse == true and hit(2).mouse == false and hit(4).mouse == false, "only the real totem is clickable, placeholders never block the mouse")
+
+	-- an earth totem comes down: it fills its place, the placeholder goes
+	pos = { y = 0, x = 0, map = 1 }; put(2, "Strength of Earth Totem II")
+	check(not holders[2].shown and btn(2).shown and X(btn(2)) == 0, "earth totem placed: it fills the first place, its placeholder is gone")
+	check(holders[4].shown and X(holders[4]) == 2 * gap, "...air still marked as missing")
+	-- it expires: the place stays
+	totems[2] = nil; fire("PLAYER_TOTEM_UPDATE", 2)
+	check(holders[2].shown and X(holders[2]) == 0 and X(btn(1)) == gap, "earth expires: the place stays open and fire does not slide over")
+
+	-- nothing out at all: nothing drawn
+	out()
+	check(not bar().shown and not holders[2].shown and not holders[4].shown, "no totems out at all: no placeholders either")
+
+	-- a reserved totem that appears mid-fight lands exactly in its place (and nothing protected is touched)
+	put(1, "Searing Totem III")
+	inCombat = true; put(4, "Windfury Totem")
+	check(btn(4).shown and X(btn(4)) == 2 * gap and not holders[4].shown, "mid-fight: the air totem appears in air's own place")
+	inCombat = false; fire("PLAYER_REGEN_ENABLED")
+	check(hit(4).mouse == true and X(hit(4)) == 2 * gap, "after the fight it is clickable there")
+
+	-- all four reserved
+	out(); put(3, "Mana Spring Totem")
+	TotemRangeDB.reserve = { [1] = true, [2] = true, [3] = true, [4] = true }; ns.apply()
+	check(holders[2].shown and holders[1].shown and holders[4].shown and not holders[3].shown and X(btn(3)) == 2 * gap, "all four reserved: water out, the other three marked, nothing moves")
+
+	-- vertical keeps the same order down the bar
+	TotemRangeDB.vertical = true; ns.apply()
+	check(Y(holders[2]) == 0 and Y(holders[1]) == -gap and Y(btn(3)) == -2 * gap and Y(holders[4]) == -3 * gap, "vertical: the same places, top to bottom")
+	TotemRangeDB.vertical = false; ns.apply()
+
+	-- the settings preview: a reserved element shows its placeholder instead of a sample
+	out(); TotemRangeDB.reserve = { [3] = true }; ns.optionsOpen = true; ns.updatePreview()
+	check(holders[3].shown and not btn(3).shown and btn(1).shown and btn(2).shown and btn(4).shown, "settings preview: water reserved shows as an empty place, the others as samples")
+	TotemRangeDB.reserve = {}; ns.apply()
+	check(not holders[3].shown and btn(3).shown, "...and unticking it brings the sample back")
+	TotemRangeDB.reserve = { [1] = true, [2] = true, [3] = true, [4] = true }; ns.apply()
+	check(holders[1].shown and holders[2].shown and holders[3].shown and holders[4].shown, "preview with everything reserved: four empty places")
+	ns.optionsOpen = false; ns.updatePreview()
+	check(not holders[1].shown and not holders[2].shown and not bar().shown, "settings closed, nothing out: no placeholders")
+
+	-- the four boxes in the settings
+	local boxes = {}
+	for _, f in ipairs(frames) do if f.slotKey and f.scripts.OnClick then boxes[f.slotKey] = f end end
+	check(boxes[1] and boxes[2] and boxes[3] and boxes[4], "settings: a box for each element")
+	TotemRangeDB.reserve = {}
+	boxes[3].checked = true; boxes[3].scripts.OnClick(boxes[3])
+	check(TotemRangeDB.reserve[3] == true and not TotemRangeDB.reserve[2], "ticking Water reserves water only")
+	boxes[3].checked = false; boxes[3].scripts.OnClick(boxes[3])
+	check(TotemRangeDB.reserve[3] == nil, "unticking it clears it")
+	TotemRangeDB.reserve = { [2] = true }; savedCat.panel.OnRefresh()
+	check(boxes[2].checked == true and not boxes[1].checked, "the boxes show the saved state when the panel opens")
+	savedCat.panel.OnDefault()
+	check(next(TotemRangeDB.reserve) == nil, "Defaults clears them")
+
+	-- damaged saved data
+	for label, bad in pairs({ ["a string"] = "x", ["yes/no text"] = { [2] = "yes", [3] = 0 }, ["a number"] = 7 }) do
+		TotemRangeDB.reserve = bad
+		fire("PLAYER_ENTERING_WORLD"); ns.fixReserve()
+		local r = TotemRangeDB.reserve
+		check(type(r) == "table" and r[2] == nil and r[3] == nil, "damaged reserve (" .. label .. ") is cleaned")
+	end
+	TotemRangeDB.reserve = {}; TotemRangeDB.distanceMode = "off"; ns.apply(); out()
+end
+
 -- ---- order: earth, fire, water, air like the default totem bar; reorderable; damaged data falls back
 do
 	local function xOf(slot) return btn(slot).anchor and btn(slot).anchor[4] end

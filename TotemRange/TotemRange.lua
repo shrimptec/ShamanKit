@@ -57,6 +57,16 @@ local function fixOrder()
 end
 ns.fixOrder = fixOrder
 
+-- db.reserve[slot] = true keeps that element's place open in the bar even when no totem of it is out (a dim
+-- placeholder fills it), so the gap itself shows what is missing. Always a table of booleans.
+local function fixReserve()
+	local r = db.reserve
+	if type(r) ~= "table" then r = {}; db.reserve = r end
+	for slot = 1, MAX_SLOTS do if r[slot] ~= true and r[slot] ~= nil then r[slot] = nil end end
+	return r
+end
+ns.fixReserve = fixReserve
+
 -- Radius in yards, matched on the English totem name (others fall back to 30, the Forever buff radius).
 -- aura = the buff name to look for when positions are unavailable.
 local DEFAULT_RANGE = 30
@@ -276,6 +286,27 @@ local function newButton(slot)
 	return b
 end
 
+-- The placeholder for a reserved place with no totem in it: the element's totem icon, dimmed and grey, in the
+-- same frame the action buttons use. A plain frame of its own (a button's children hide with the button).
+local holds = {}
+local HOLD_SPELL = { [1] = 3599, [2] = 8071, [3] = 5394, [4] = 8835 }   -- one totem per element, for the picture
+local function newHolder(slot)
+	local h = CreateFrame("Frame", nil, bar)
+	h.icon = h:CreateTexture(nil, "BACKGROUND")
+	h.icon:SetAllPoints()
+	h.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+	local tex = C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(HOLD_SPELL[slot])
+	h.icon:SetTexture(tex or "Interface\\Icons\\INV_Misc_QuestionMark")
+	h.icon:SetDesaturated(true)
+	h.icon:SetAlpha(0.35)
+	h.border = h:CreateTexture(nil, "OVERLAY")
+	h.border:SetTexture("Interface\\Buttons\\UI-Quickslot2")
+	h.border:SetPoint("CENTER", 0, -1)
+	h.border:SetAlpha(0.6)
+	h:Hide()
+	return h
+end
+
 -- The clickable layer. Right-click dismisses the totem: the game only lets its own secure code do that,
 -- so each slot gets a secure button with the built-in "destroytotem" action (what the default totem bar
 -- uses). Secure buttons can't be created, moved, resized or have their attributes changed in combat,
@@ -331,11 +362,13 @@ local layoutPending = false
 local function layout()
 	if InCombatLockdown() then layoutPending = true return end   -- the hit buttons can't move in combat
 	layoutPending = false
-	local want, order = fixOrder(), {}
-	for _, slot in ipairs(want) do if buttons[slot]:IsShown() then order[#order + 1] = slot end end
+	local want, reserve, order = fixOrder(), fixReserve(), {}
+	-- a place is taken by a totem that is out or by a reserved element (so a reserved totem that appears
+	-- mid-fight lands exactly where its placeholder was)
+	for _, slot in ipairs(want) do if buttons[slot]:IsShown() or reserve[slot] then order[#order + 1] = slot end end
 	local n = #order
-	-- slots without a totem are parked after the shown ones: a totem that appears mid-fight lands on its own spot
-	for _, slot in ipairs(want) do if not buttons[slot]:IsShown() then order[#order + 1] = slot end end
+	-- the rest are parked after those: a totem that appears mid-fight lands on its own spot
+	for _, slot in ipairs(want) do if not (buttons[slot]:IsShown() or reserve[slot]) then order[#order + 1] = slot end end
 	local s, gap = db.size, db.spacing
 	for i, slot in ipairs(order) do
 		local h = hits[slot]
@@ -349,10 +382,16 @@ local function layout()
 		if db.vertical then y = -off else x = off end
 		h:SetPoint("TOPLEFT", bar, "TOPLEFT", x, y)
 		b:SetPoint("TOPLEFT", bar, "TOPLEFT", x, y)   -- same spot; not anchored to the protected button, so it stays freely showable
-		h:EnableMouse(i <= n)   -- no invisible click-blocking squares where there is no totem
+		h:EnableMouse(b:IsShown())   -- no invisible click-blocking squares where there is no totem
+		local ph = holds[slot]
+		ph:ClearAllPoints()
+		ph:SetSize(s, s)
+		ph.border:SetSize(s * 66 / 36, s * 66 / 36)
+		ph:SetPoint("TOPLEFT", bar, "TOPLEFT", x, y)
 	end
 	local long = math.max(n, 1) * s + math.max(n - 1, 0) * gap
 	if db.vertical then bar:SetSize(s, long) else bar:SetSize(long, s) end
+	ns.refreshHolders()
 end
 
 local function setMark(b, r)
@@ -527,11 +566,23 @@ local function refreshSlot(slot, placed)
 	b:Show()
 end
 
+-- Placeholders: only for reserved places that are empty, and only while the bar is up (a totem is out, or the
+-- settings are open): with nothing out at all there is nothing to compare against, so nothing is drawn.
+function ns.refreshHolders()
+	local reserve = fixReserve()
+	local up = bar and (bar.anyShown or previewing)
+	for slot = 1, MAX_SLOTS do
+		local ph = holds[slot]
+		if ph then ph:SetShown(up and reserve[slot] and not buttons[slot]:IsShown() and true or false) end
+	end
+end
+
 local function updateShown()
 	local any = false
 	for slot = 1, MAX_SLOTS do if buttons[slot]:IsShown() then any = true end end
 	bar.anyShown = any
 	bar:SetShown(any or (ns.optionsOpen and true or false))
+	ns.refreshHolders()
 end
 
 local function refreshAll()
@@ -597,8 +648,12 @@ local function showPreview()
 		b.cooldown:SetCooldown(GetTime() - 30 * slot, 300)
 		sizeButton(b)
 		invalidate(b)
-		b:Show()
-		paintRange(b, slot ~= 3, SAMPLE_DIST[slot], SAMPLE_RANGE[slot])   -- one shown out of range so the look can be judged
+		if fixReserve()[slot] then
+			b:Hide()   -- the preview of a missing totem: its placeholder shows instead of a sample
+		else
+			b:Show()
+			paintRange(b, slot ~= 3, SAMPLE_DIST[slot], SAMPLE_RANGE[slot])   -- one shown out of range so the look can be judged
+		end
 	end
 	layout()
 	bar:Show()
@@ -733,6 +788,7 @@ local function build()
 	for slot = 1, MAX_SLOTS do
 		buttons[slot] = newButton(slot)
 		hits[slot] = newHit(slot, buttons[slot])
+		holds[slot] = newHolder(slot)
 	end
 	applyAttach()
 	layout()
@@ -808,6 +864,7 @@ ev:SetScript("OnEvent", guard("event", function(self, event, arg1, ...)
 		db = TotemRangeDB
 		for k, v in pairs(ns.defaults) do if db[k] == nil then db[k] = v end end
 		fixOrder()
+		fixReserve()
 		self:UnregisterEvent("ADDON_LOADED")
 		if InCombatLockdown() then
 			-- secure buttons can't be made in combat: build when it ends

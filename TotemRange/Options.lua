@@ -3,7 +3,8 @@
 
 local ADDON, ns = ...
 
-local function checkbox(parent, label, key, x, y)
+-- get/set are optional: a plain setting is read and written as ns.get()[key]
+local function checkbox(parent, label, key, x, y, get, set)
 	local cb = CreateFrame("CheckButton", nil, parent)
 	cb:SetSize(26, 26)
 	cb:SetPoint("TOPLEFT", x, y)
@@ -17,11 +18,11 @@ local function checkbox(parent, label, key, x, y)
 	text:SetText(label)
 	cb:SetScript("OnClick", function(self)
 		local on = self:GetChecked() and true or false
-		ns.get()[key] = on
+		if set then set(on) else ns.get()[key] = on end
 		PlaySound(on and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
 		ns.updatePreview()
 	end)
-	cb.refresh = function() cb:SetChecked(ns.get()[key]) end
+	cb.refresh = function() cb:SetChecked(get and get() or (not get and ns.get()[key])) end
 	return cb
 end
 
@@ -185,6 +186,24 @@ function ns.buildOptions()
 		radios[i] = { rb = rb, mode = m[1] }
 	end
 
+	-- Keep a place open for an element even when its totem is down: the dim placeholder makes the missing one obvious.
+	local holdTitle = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+	holdTitle:SetPoint("TOPLEFT", 330, -402)
+	holdTitle:SetText("Keep a space open for")
+	local holdHint = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+	holdHint:SetPoint("TOPLEFT", holdTitle, "BOTTOMLEFT", 0, -4)
+	holdHint:SetText("A dim icon marks the missing totem.")
+	local holdBoxes = {}
+	local HOLD_AT = { { 2, 330, -440 }, { 1, 440, -440 }, { 3, 330, -468 }, { 4, 440, -468 } }   -- earth, fire / water, air
+	for _, e in ipairs(HOLD_AT) do
+		local slot = e[1]
+		local cb = checkbox(panel, ns.SLOT_NAMES[slot], nil, e[2], e[3],
+			function() return ns.fixReserve()[slot] == true end,
+			function(on) ns.fixReserve()[slot] = on or nil end)
+		cb.slotKey = slot
+		holdBoxes[#holdBoxes + 1] = cb
+	end
+
 	local reset = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
 	reset:SetSize(140, 24)
 	reset:SetPoint("TOPLEFT", 16, -490)
@@ -207,6 +226,7 @@ function ns.buildOptions()
 		dependents()
 		refreshOrder()
 		refreshDistance()
+		for _, cb in ipairs(holdBoxes) do cb.refresh() end
 	end
 	panel:SetScript("OnShow", function()
 		refresh()
@@ -225,6 +245,7 @@ function ns.buildOptions()
 			if k ~= "point" and k ~= "relPoint" and k ~= "x" and k ~= "y" then db[k] = v end
 		end
 		db.order = ns.defaultOrder()
+		db.reserve = {}
 		refresh()
 		ns.updatePreview()
 	end
