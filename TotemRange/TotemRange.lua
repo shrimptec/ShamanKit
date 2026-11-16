@@ -169,11 +169,12 @@ local function remember(slot, icon, name)
 	local tex
 	if icon ~= nil and not isSecret(icon) and (type(icon) == "number" or type(icon) == "string") then tex = icon
 	else tex = iconForName(name) end
-	if tex then
+	if tex ~= nil and not isSecret(tex) and (type(tex) == "number" or type(tex) == "string") then
 		local last = fixHold().last
 		if last[slot] ~= tex then last[slot] = tex end
 	end
 end
+
 
 -- Radius in yards, matched on the English totem name (others fall back to 30, the Forever buff radius).
 -- aura = the buff name to look for when positions are unavailable.
@@ -229,6 +230,9 @@ local function guard(where, fn)
 		end
 	end
 end
+
+-- Bookkeeping must never stop a totem from being shown: it runs after the icon is up, and a failure is only logged.
+local rememberSafe = guard("remember", remember)
 
 -- Where the player is, from every source that is readable right now. Two independent sources so that
 -- a restriction on one (combat, instances) still leaves the other:
@@ -663,19 +667,23 @@ local function refreshSlot(slot, placed)
 		s.range, s.aura = classify(name)
 	end
 	s.range = s.range or DEFAULT_RANGE
-	remember(slot, icon, s.name)
 	s.start = readable(start) and start or nil   -- a new start time means the totem was dropped again
 	b.sampleName = s.name
 	pcall(b.icon.SetTexture, b.icon, icon)
+	if isSecret(icon) then   -- the game hides the icon in a fight: the name of the totem tells which picture it is
+		local ok, known = pcall(iconForName, s.name)
+		if ok and known and not isSecret(known) then pcall(b.icon.SetTexture, b.icon, known) end
+	end
 	refreshTimer(b, slot, start, duration)
 	sizeButton(b)
 	invalidate(b)
 	b:Show()
+	rememberSafe(slot, icon, s.name)
 end
 
 -- Placeholders: only for reserved places that are empty, and only while the bar is up (a totem is out, or the
 -- settings are open): with nothing out at all there is nothing to compare against, so nothing is drawn.
-function ns.refreshHolders()
+local function doRefreshHolders()
 	local reserve, hold = fixReserve(), fixHold()
 	local up = bar and (bar.anyShown or previewing)
 	for slot = 1, MAX_SLOTS do
@@ -690,6 +698,7 @@ function ns.refreshHolders()
 		end
 	end
 end
+ns.refreshHolders = guard("placeholders", doRefreshHolders)
 
 local function updateShown()
 	local any = false
@@ -946,7 +955,7 @@ local function onTotemCast(id)
 				st.name = cast
 				st.range, st.aura = classify(cast)
 				st.last = nil
-				remember(slot, nil, cast)
+				rememberSafe(slot, nil, cast)
 				dbg("named slot %d from cast: %s", slot, cast)
 			end
 		end

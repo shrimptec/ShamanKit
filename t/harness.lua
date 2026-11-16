@@ -724,6 +724,47 @@ do
 	TotemRangeDB.reserve = {}; TotemRangeDB.hold = nil; ns.fixHold(); out()
 end
 
+-- ---- a failure in the bookkeeping (memory of icons, placeholders) must never stop a totem from showing, least of all mid-fight
+do
+	local function out() totems = {}; for slot = 1, 4 do fire("PLAYER_TOTEM_UPDATE", slot) end end
+	local function errorsInLog(what)
+		local n = 0
+		for _, l in ipairs(TotemRangeDB.log or {}) do if l:find("ERROR in " .. what, 1, true) then n = n + 1 end end
+		return n
+	end
+	TotemRangeDB.hold = nil; TotemRangeDB.reserve = { [1] = true, [4] = true }; TotemRangeDB.distanceMode = "bar"
+	secretPos = false; pos = { y = 0, x = 0, map = 1 }; inCombat = false; secretMode = false
+	fire("PLAYER_ENTERING_WORLD"); out(); ns.fixHold()
+	local realPrinted = #printedErrors
+
+	-- in a fight, the icon hidden: the totem still shows, with the right picture from its name
+	secretMode = true; inCombat = true
+	fire("UNIT_SPELLCAST_SUCCEEDED", "player", "g", 5675)
+	totems[3] = { name = "Mana Spring Totem", start = t, dur = 300, icon = 4242 }
+	fire("PLAYER_TOTEM_UPDATE", 3); runTimers()
+	check(btn(3).shown, "mid-fight, readings hidden: the totem shows")
+	check(btn(3).icon.tex == 100000 + 5675, "...with its own picture (worked out from the totem's name), not a blank")
+
+	-- the memory code breaking must not matter
+	out(); secretMode = false; inCombat = false
+	TotemRangeDB.hold = setmetatable({}, { __index = function() error("boom (test)") end })
+	secretMode = true; inCombat = true
+	fire("UNIT_SPELLCAST_SUCCEEDED", "player", "g", 5675)
+	totems[3] = { name = "Mana Spring Totem", start = t, dur = 300, icon = 4242 }
+	fire("PLAYER_TOTEM_UPDATE", 3); runTimers(); tick()
+	check(btn(3).shown, "memory code failing mid-fight: the totem still shows")
+	check(errorsInLog("remember") + errorsInLog("placeholders") >= 1, "...and the failure is written to the log")
+	pos = { y = 0, x = 5, map = 1 }; tick()
+	check(btn(3).shown and btn(3).gauge.shown, "...and the range bar keeps working")
+	-- a second totem after the failure still shows: nothing was left half-done
+	totems[2] = { name = "Strength of Earth Totem", start = t, dur = 300, icon = 4243 }
+	fire("PLAYER_TOTEM_UPDATE", 2)
+	check(btn(2).shown and btn(3).shown, "...and so does the next totem")
+	secretMode = false; inCombat = false
+	TotemRangeDB.hold = nil; ns.fixHold(); TotemRangeDB.reserve = {}; out()
+	while #printedErrors > realPrinted do table.remove(printedErrors) end   -- these errors were on purpose
+end
+
 -- ---- order: earth, fire, water, air like the default totem bar; reorderable; damaged data falls back
 do
 	local function xOf(slot) return btn(slot).anchor and btn(slot).anchor[4] end
