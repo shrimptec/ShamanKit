@@ -27,6 +27,35 @@ ns.defaults = {
 }
 
 local isSecret = issecretvalue or function() return false end
+local db
+
+-- Game slots: 1 fire, 2 earth, 3 water, 4 air. The default totem bar shows them earth, fire, water, air, so
+-- that is the default here too; the settings let the player reorder them (db.order = list of slots).
+ns.SLOT_NAMES = { [1] = "Fire", [2] = "Earth", [3] = "Water", [4] = "Air" }
+local function defaultOrder()
+	local o, seen = {}, {}
+	for _, slot in ipairs({ 2, 1, 3, 4 }) do
+		if slot <= MAX_SLOTS then o[#o + 1] = slot; seen[slot] = true end
+	end
+	for slot = 1, MAX_SLOTS do if not seen[slot] then o[#o + 1] = slot end end
+	return o
+end
+ns.defaultOrder = defaultOrder
+
+-- db.order must be every slot exactly once; anything else (a hand-edited or damaged file) falls back to the default.
+local function fixOrder()
+	local o, seen, ok = db.order, {}, true
+	if type(o) ~= "table" or #o ~= MAX_SLOTS then ok = false
+	else
+		for _, slot in ipairs(o) do
+			if type(slot) ~= "number" or slot < 1 or slot > MAX_SLOTS or slot % 1 ~= 0 or seen[slot] then ok = false break end
+			seen[slot] = true
+		end
+	end
+	if not ok then db.order = defaultOrder() end
+	return db.order
+end
+ns.fixOrder = fixOrder
 
 -- Radius in yards, matched on the English totem name (others fall back to 30, the Forever buff radius).
 -- aura = the buff name to look for when positions are unavailable.
@@ -52,7 +81,6 @@ local function classify(name)
 end
 ns.classify = classify
 
-local db
 local bar, buttons, hits = nil, {}, {}
 local state = {}          -- slot -> { at = placement position, range, aura, name }
 local previewing = false
@@ -89,12 +117,15 @@ end
 --   u = UnitPosition (yards)   m = world map position scaled by the map's size in yards
 local function readable(v) return v ~= nil and not isSecret(v) and type(v) == "number" end
 
-local function playerPos()
-	local p = {}
+local function readUnitPos(p)
 	if UnitPosition then
 		local ok, y, x, _, map = pcall(UnitPosition, "player")
 		if ok and readable(y) and readable(x) then p.uy, p.ux, p.umap = y, x, map end
 	end
+end
+
+local function readMapPos(p)
+	p.mapRead = true
 	if C_Map and C_Map.GetBestMapForUnit and C_Map.GetPlayerMapPosition and C_Map.GetMapWorldSize then
 		local ok, mapID = pcall(C_Map.GetBestMapForUnit, "player")
 		if ok and readable(mapID) then
@@ -106,7 +137,24 @@ local function playerPos()
 			end
 		end
 	end
+end
+
+-- A fresh, complete reading: kept as a totem's placement, so it must not be reused or changed afterwards.
+local function playerPos()
+	local p = {}
+	readUnitPos(p)
+	readMapPos(p)
 	return p
+end
+
+-- The per-tick reading: ONE table reused every tick (no garbage), and the map source is only read when
+-- the yard position can't answer. Not to be stored.
+local scratch = {}
+local function tickPos()
+	scratch.uy, scratch.ux, scratch.umap = nil, nil, nil
+	scratch.mx, scratch.my, scratch.mw, scratch.mh, scratch.mapID, scratch.mapRead = nil, nil, nil, nil, nil, false
+	readUnitPos(scratch)
+	return scratch
 end
 
 -- true / false, or nil when it can't be read
@@ -125,15 +173,21 @@ local function describe(p)
 end
 
 -- true = in range, false = out, nil = unknown; second value says how it was decided
-local function rangeOf(slot)
+local function rangeOf(slot, now)
 	local s = state[slot]
 	if not s then return nil end
-	local now, was = playerPos(), s.at
+	now = now or playerPos()
+	local was = s.at
 	local r, how, dist
 	if was and was.ux and now.ux and now.umap == was.umap then
 		local dx, dy = now.ux - was.ux, now.uy - was.uy
 		dist = math.sqrt(dx * dx + dy * dy)
 		r, how = dist <= s.range, "position"
+	else
+		if not now.mapRead then readMapPos(now) end   -- the yard position could not answer: ask the map
+	end
+	if how then
+		-- decided above
 	elseif was and was.mx and now.mx and now.mapID == was.mapID then
 		local dx, dy = (now.mx - was.mx) * now.mw, (now.my - was.my) * now.mh
 		dist = math.sqrt(dx * dx + dy * dy)
@@ -146,6 +200,7 @@ local function rangeOf(slot)
 	local key = tostring(r) .. how
 	if s.last ~= key then
 		s.last = key
+		if not now.mapRead then readMapPos(now) end   -- the log line wants both sources
 		dbg("slot %d %s -> %s via %s dist=%s range=%s | now %s | placed %s | combat=%s",
 			slot, tostring(s.name), tostring(r), how, dist and ("%.1f"):format(dist) or "-", tostring(s.range),
 			describe(now), describe(was), tostring(InCombatLockdown()))
@@ -239,11 +294,11 @@ local layoutPending = false
 local function layout()
 	if InCombatLockdown() then layoutPending = true return end   -- the hit buttons can't move in combat
 	layoutPending = false
-	local order = {}
-	for slot = 1, MAX_SLOTS do if buttons[slot]:IsShown() then order[#order + 1] = slot end end
+	local want, order = db.order, {}
+	for _, slot in ipairs(want) do if buttons[slot]:IsShown() then order[#order + 1] = slot end end
 	local n = #order
 	-- slots without a totem are parked after the shown ones: a totem that appears mid-fight lands on its own spot
-	for slot = 1, MAX_SLOTS do if not buttons[slot]:IsShown() then order[#order + 1] = slot end end
+	for _, slot in ipairs(want) do if not buttons[slot]:IsShown() then order[#order + 1] = slot end end
 	local s, gap = db.size, db.spacing
 	for i, slot in ipairs(order) do
 		local h = hits[slot]
@@ -281,11 +336,28 @@ local function setDistance(b, dist, r)
 	b.dist:Show()
 end
 
+-- Called every tick for every shown totem, so it only touches the screen when what is drawn would change:
+-- the mark, the tint and the distance text (to a tenth of a yard) are each remembered on the button.
+local function invalidate(b) b.pc, b.psr, b.pt, b.pd, b.pdc, b.pdv = nil, nil, nil, nil, nil, nil end
+
 local function paintRange(b, r, dist)
-	setMark(b, r)
-	setDistance(b, dist, r)
-	if r == false and db.tint then b.icon:SetVertexColor(unpack(OUT_COLOR))
-	else b.icon:SetVertexColor(1, 1, 1) end
+	local c = r == nil and 0 or (r and 1 or 2)
+	local showRange = db.showRange and true or false
+	if b.pc ~= c or b.psr ~= showRange then
+		b.pc, b.psr = c, showRange
+		setMark(b, r)
+	end
+	local tint = (r == false and db.tint) and true or false
+	if b.pt ~= tint then
+		b.pt = tint
+		if tint then b.icon:SetVertexColor(unpack(OUT_COLOR)) else b.icon:SetVertexColor(1, 1, 1) end
+	end
+	local tenth = (db.showDistance and dist) and math.floor(dist * 10 + 0.5) or -1
+	local vertical = db.vertical and true or false
+	if b.pd ~= tenth or b.pdc ~= c or b.pdv ~= vertical then
+		b.pd, b.pdc, b.pdv = tenth, c, vertical
+		setDistance(b, dist, r)
+	end
 end
 
 -- ---------------------------------------------------------------- real totems
@@ -319,7 +391,7 @@ local function readSlot(slot)
 		exists = have and (isSecret(name) or (type(name) == "string" and name ~= ""))
 	end
 	if not exists then return false end
-	return true, name, start, duration, icon
+	return true, name, start, duration, icon, not isSecret(have)
 end
 
 -- The totem spell just cast, for naming a totem whose name the game hides in combat
@@ -335,6 +407,7 @@ local function refreshSlot(slot, placed)
 	if have == "keep" then return end
 	if not have then
 		state[slot] = nil
+		invalidate(b)
 		b:Hide()
 		return
 	end
@@ -361,6 +434,7 @@ local function refreshSlot(slot, placed)
 	pcall(b.icon.SetTexture, b.icon, icon)
 	refreshTimer(b, slot, start, duration)
 	sizeButton(b)
+	invalidate(b)
 	b:Show()
 end
 
@@ -380,12 +454,11 @@ end
 
 -- Dropping a totem again while one is already in that slot sends no event we can rely on, so notice it
 -- by the start time changing and re-record where we are standing.
-local function noticeReplaced(slot)
+local function noticeReplaced(slot, visible, start)
 	local s = state[slot]
 	if not s or not s.start then return end
-	local ok, have, _, start = pcall(GetTotemInfo, slot)
 	-- in combat these can be secret values, which can't even be compared: leave those to the cast backup
-	if ok and not isSecret(have) and have and readable(start) and start > 0 and math.abs(start - s.start) > 0.05 then
+	if visible and readable(start) and start > 0 and math.abs(start - s.start) > 0.05 then
 		dbg("REPLACED slot %d %s (start %.2f -> %.2f)", slot, tostring(s.name), s.start, start)
 		refreshSlot(slot, true)
 	end
@@ -393,21 +466,25 @@ end
 
 local function tick()
 	if previewing then return end
-	local any = false
+	local any, cleared = false, false
+	local now = tickPos()
 	for slot = 1, MAX_SLOTS do
 		local b = buttons[slot]
 		if b:IsShown() then
-			if readSlot(slot) == false then
+			local have, _, start, _, _, visible = readSlot(slot)
+			if have == false then
 				refreshSlot(slot)   -- expired or destroyed: clears the button
-				layout()
+				cleared = true
+			else
+				any = true
+				if have then noticeReplaced(slot, visible, start) end
+				local r, _, d = rangeOf(slot, now)
+				paintRange(b, r, d)
 			end
-			any = true
-			noticeReplaced(slot)
-			local r, _, d = rangeOf(slot)
-			paintRange(b, r, d)
 		end
 	end
 	bar.anyShown = any
+	if cleared then layout() updateShown() end   -- the last one gone: hide the bar, which also stops this tick
 end
 
 -- ---------------------------------------------------------------- preview (unlocked / settings open)
@@ -429,6 +506,7 @@ local function showPreview()
 		b.cooldown:SetHideCountdownNumbers(not db.showTimer)
 		b.cooldown:SetCooldown(GetTime() - 30 * slot, 300)
 		sizeButton(b)
+		invalidate(b)
 		b:Show()
 		paintRange(b, slot ~= 3, SAMPLE_DIST[slot])   -- one shown out of range so the look can be judged
 	end
@@ -440,6 +518,7 @@ local function endPreview()
 	previewing = false
 	for slot = 1, MAX_SLOTS do
 		buttons[slot]:Hide()
+		invalidate(buttons[slot])
 		buttons[slot].cooldown:Clear()
 		buttons[slot].icon:SetVertexColor(1, 1, 1)
 	end
@@ -529,6 +608,21 @@ function ns.resetPosition()
 end
 
 function ns.get() return db end
+
+-- Reordering (settings panel). `pos` is the place in the bar (1 = first), `delta` -1 = earlier, +1 = later.
+function ns.moveSlot(pos, delta)
+	local o = fixOrder()
+	local to = pos + delta
+	if not o[pos] or not o[to] then return false end
+	o[pos], o[to] = o[to], o[pos]
+	if bar then ns.apply() end
+	return true
+end
+
+function ns.resetOrder()
+	db.order = defaultOrder()
+	if bar then ns.apply() end
+end
 
 -- ---------------------------------------------------------------- setup
 
@@ -623,6 +717,7 @@ ev:SetScript("OnEvent", guard("event", function(self, event, arg1, ...)
 		TotemRangeDB = TotemRangeDB or {}
 		db = TotemRangeDB
 		for k, v in pairs(ns.defaults) do if db[k] == nil then db[k] = v end end
+		fixOrder()
 		self:UnregisterEvent("ADDON_LOADED")
 		if InCombatLockdown() then
 			-- secure buttons can't be made in combat: build when it ends

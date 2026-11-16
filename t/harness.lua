@@ -8,6 +8,7 @@ SECRET.__tostring = function() return "<secret>" end
 local function secret() return setmetatable({}, SECRET) end
 issecretvalue = function(v) return type(v) == "table" and getmetatable(v) == SECRET end
 local scripts = {}
+CALLS = setmetatable({}, { __index = function() return 0 end })
 local function mock(kind)
 	local o = { kind = kind, shown = true, scripts = {}, checked = false, value = 0, attrs = {} }
 	return setmetatable(o, { __index = function(t, k)
@@ -32,10 +33,11 @@ local function mock(kind)
 		if k == "EnableMouse" then return function(self, v) self.mouse = v end end
 		if k == "SetChecked" then return function(self, v) self.checked = v end end
 		if k == "SetValue" then return function(self, v) self.value = v; if self.scripts.OnValueChanged then self.scripts.OnValueChanged(self, v) end end end
-		if k == "SetText" then return function(self, v) self.text = v end end
-		if k == "SetTextColor" then return function(self, ...) self.color = { ... } end end
-		if k == "SetVertexColor" then return function(self, ...) self.color = { ... } end end
-		if k == "SetTexture" then return function(self, v) self.tex = v end end
+		if k == "SetText" then return function(self, v) CALLS.SetText = CALLS.SetText + 1; self.text = v end end
+		if k == "SetTextColor" then return function(self, ...) CALLS.SetTextColor = CALLS.SetTextColor + 1; self.color = { ... } end end
+		if k == "SetVertexColor" then return function(self, ...) CALLS.SetVertexColor = CALLS.SetVertexColor + 1; self.color = { ... } end end
+		if k == "SetTexture" then return function(self, v) CALLS.SetTexture = CALLS.SetTexture + 1; self.tex = v end end
+		if k == "SetPoint" then return function(self, ...) self.anchor = { ... } end end
 		if k == "SetSize" then return function(self, w, h) self.w, self.h = w, h end end
 		if k == "SetCooldown" then return function(self, s, d) self.cd = { s, d } end end
 		if k == "GetPoint" then return function() return "CENTER", nil, "CENTER", 10, 20 end end
@@ -404,6 +406,121 @@ for _, mode in ipairs({ true, "all" }) do
 	check(ok, label .. ": nothing raises" .. (ok and "" or (" -> " .. tostring(err))))
 	noErrors(label .. ": nothing in the error log")
 	secretMode = false; secretPos = false; inCombat = false
+end
+
+
+-- ---- order: earth, fire, water, air like the default totem bar; reorderable; damaged data falls back
+do
+	local function xOf(slot) return btn(slot).anchor and btn(slot).anchor[4] end
+	local function placeAll()
+		totems = {
+			[1] = { name = "Searing Totem III", start = t, dur = 60, icon = 7 }, [2] = { name = "Strength of Earth Totem II", start = t, dur = 300, icon = 8 },
+			[3] = { name = "Mana Spring Totem", start = t, dur = 300, icon = 9 }, [4] = { name = "Windfury Totem", start = t, dur = 300, icon = 10 } }
+		secretMode = false; secretPos = false; inCombat = false
+		pos = { y = 0, x = 0, map = 1 }
+		fire("PLAYER_ENTERING_WORLD"); for slot = 1, 4 do fire("PLAYER_TOTEM_UPDATE", slot) end
+	end
+	local function sequence()   -- slots left to right
+		local list = {}
+		for slot = 1, 4 do if btn(slot).shown then list[#list + 1] = { slot, xOf(slot) } end end
+		table.sort(list, function(a, b) return a[2] < b[2] end)
+		local out = {}
+		for _, e in ipairs(list) do out[#out + 1] = e[1] end
+		return table.concat(out, ",")
+	end
+	local gap = TotemRangeDB.size + TotemRangeDB.spacing
+	TotemRangeDB.order = nil; ns.fixOrder()
+	check(table.concat(TotemRangeDB.order, ",") == "2,1,3,4", "default order is earth, fire, water, air (slots 2,1,3,4)")
+	TotemRangeDB.vertical = false
+	placeAll()
+	check(sequence() == "2,1,3,4" and xOf(2) == 0 and xOf(1) == gap and xOf(3) == 2 * gap and xOf(4) == 3 * gap,
+		"all four out: earth, fire, water, air, left to right with the right spacing")
+	totems[3] = nil; fire("PLAYER_TOTEM_UPDATE", 3)
+	check(sequence() == "2,1,4" and xOf(4) == 2 * gap, "no water totem: the others close the gap but keep their order")
+	local n = 0
+	local before = table.concat(TotemRangeDB.order, ",")
+	check(ns.moveSlot(1, -1) == false and ns.moveSlot(4, 1) == false and table.concat(TotemRangeDB.order, ",") == before,
+		"moving the first one up / the last one down does nothing")
+	check(ns.moveSlot(1, 1) == true and table.concat(TotemRangeDB.order, ",") == "1,2,3,4", "move earth down one: fire, earth, water, air")
+	check(sequence() == "1,2,4", "...and the bar follows at once")
+	check(ns.moveSlot(4, -1) == true and table.concat(TotemRangeDB.order, ",") == "1,2,4,3" and sequence() == "1,2,4", "move air up: fire, earth, air, water")
+	-- the real Up / Down buttons in the settings panel
+	local down
+	for _, f in ipairs(frames) do if f.text == "Down" and f.scripts.OnClick then down = f break end end
+	check(down ~= nil, "settings panel has Up / Down buttons")
+	TotemRangeDB.order = { 2, 1, 3, 4 }
+	down.scripts.OnClick(down)    -- the first Down button: earth <-> fire
+	check(table.concat(TotemRangeDB.order, ",") == "1,2,3,4", "the first Down button swaps the first two")
+	local reset
+	for _, f in ipairs(frames) do if f.text == "Reset order" and f.scripts.OnClick then reset = f break end end
+	reset.scripts.OnClick(reset)
+	check(table.concat(TotemRangeDB.order, ",") == "2,1,3,4" and sequence() == "2,1,4", "Reset order restores earth, fire, water, air")
+	-- damaged saved data
+	for label, bad in pairs({ ["duplicate"] = { 1, 1, 2, 3 }, ["too short"] = { 1, 2, 3 }, ["not a table"] = "x",
+		["out of range"] = { 1, 2, 3, 9 }, ["fraction"] = { 1, 2, 3, 3.5 }, ["empty"] = {} }) do
+		TotemRangeDB.order = bad
+		fire("PLAYER_ENTERING_WORLD"); ns.fixOrder()
+		check(table.concat(TotemRangeDB.order, ",") == "2,1,3,4", "damaged order (" .. label .. ") falls back to the default")
+	end
+	TotemRangeDB.order = { 2, 1, 3, 4 }
+	-- vertical keeps the same order
+	TotemRangeDB.vertical = true; ns.apply(); placeAll()
+	local list = {}
+	for slot = 1, 4 do list[#list + 1] = { slot, btn(slot).anchor[5] } end
+	table.sort(list, function(a, b) return a[2] > b[2] end)
+	check(list[1][1] == 2 and list[2][1] == 1 and list[3][1] == 3 and list[4][1] == 4, "vertical bar: earth on top, then fire, water, air")
+	TotemRangeDB.vertical = false; ns.apply()
+	totems = {}; for slot = 1, 4 do fire("PLAYER_TOTEM_UPDATE", slot) end
+end
+
+-- ---- cost: what one tick (0.25 s) costs while four totems are out and the distance text is on (the worst case)
+do
+	totems = {
+		[1] = { name = "Searing Totem III", start = t, dur = 60, icon = 7 }, [2] = { name = "Strength of Earth Totem II", start = t, dur = 300, icon = 8 },
+		[3] = { name = "Mana Spring Totem", start = t, dur = 300, icon = 9 }, [4] = { name = "Windfury Totem", start = t, dur = 300, icon = 10 } }
+	secretMode = false; secretPos = false; inCombat = false; mapOn = true
+	pos = { y = 0, x = 0, map = 1 }
+	TotemRangeDB.showDistance = true; TotemRangeDB.showRange = true
+	fire("PLAYER_ENTERING_WORLD"); for slot = 1, 4 do fire("PLAYER_TOTEM_UPDATE", slot) end
+	for _ = 1, 20 do tick() end
+	local counts = { UnitPosition = 0, GetTotemInfo = 0, GetPlayerMapPosition = 0 }
+	local wrap = function(tbl, key, label)
+		local orig = tbl[key]
+		tbl[key] = function(...) counts[label] = counts[label] + 1; return orig(...) end
+	end
+	wrap(_G, "UnitPosition", "UnitPosition"); wrap(_G, "GetTotemInfo", "GetTotemInfo"); wrap(C_Map, "GetPlayerMapPosition", "GetPlayerMapPosition")
+	for k in pairs(CALLS) do CALLS[k] = 0 end
+	local N = 400
+	local moving = 0
+	collectgarbage(); collectgarbage("stop")
+	local before = collectgarbage("count")
+	for i = 1, N do
+		moving = moving + 0.05                      -- slowly walking, so distances really change
+		pos = { y = 0, x = moving, map = 1 }
+		tick()
+	end
+	local kb = (collectgarbage("count") - before) / N
+	collectgarbage("restart")
+	local per = function(n) return n / N end
+	print(("COST per tick: %.2f KB garbage | UnitPosition %.1f  C_Map position %.1f  GetTotemInfo %.1f | SetTexture %.1f  SetVertexColor %.1f  SetText %.1f  SetTextColor %.1f"):format(
+		kb, per(counts.UnitPosition), per(counts.GetPlayerMapPosition), per(counts.GetTotemInfo), per(CALLS.SetTexture), per(CALLS.SetVertexColor), per(CALLS.SetText), per(CALLS.SetTextColor)))
+	COST = { kb = kb, up = per(counts.UnitPosition), map = per(counts.GetPlayerMapPosition), info = per(counts.GetTotemInfo),
+		tex = per(CALLS.SetTexture), col = per(CALLS.SetVertexColor), txt = per(CALLS.SetText) }
+	TotemRangeDB.showDistance = false
+	check(COST.kb < 2, ("cost: under 2 KB of garbage per tick (was 4.2): %.2f"):format(COST.kb))
+	check(COST.up <= 1.01 and COST.map < 0.1, ("cost: one position read per tick, map only when a range edge is crossed (%.3f)"):format(COST.map))
+	check(COST.info <= 4.01, "cost: one GetTotemInfo per totem per tick (was two)")
+	check(COST.tex < 0.1 and COST.col < 0.1, ("cost: texture/colour writes only when a range edge is crossed (tex %.3f, colour %.3f)"):format(COST.tex, COST.col))
+	-- standing still with the distance text on: not even the text is rewritten
+	pos = { y = 0, x = moving, map = 1 }
+	for k in pairs(CALLS) do CALLS[k] = 0 end
+	for _ = 1, 50 do tick() end
+	check(CALLS.SetText == 0 and CALLS.SetTexture == 0 and CALLS.SetVertexColor == 0 and CALLS.SetTextColor == 0,
+		"cost: standing still, a tick writes nothing to the screen")
+	-- the last totem expiring stops the work: the bar hides (its tick only runs while it is shown)
+	totems = {}
+	tick()
+	check(not bar().shown, "cost: when the last totem expires the bar hides, so the tick stops")
 end
 
 print(fails == 0 and "ALL PASSED" or (fails .. " FAILED"))

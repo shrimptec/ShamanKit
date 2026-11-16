@@ -95,6 +95,55 @@ function ns.buildOptions()
 		ns.updatePreview()
 	end)
 
+	-- Order of the totems in the bar: one row per place, with the element, an icon and Up / Down buttons.
+	local orderTitle = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+	orderTitle:SetPoint("TOPLEFT", 330, -70)
+	orderTitle:SetText("Totem order")
+	local orderHint = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+	orderHint:SetPoint("TOPLEFT", orderTitle, "BOTTOMLEFT", 0, -4)
+	orderHint:SetText("First to last in the bar. Default: earth, fire, water, air.")
+	local SAMPLE_SPELL = { [1] = 3599, [2] = 8071, [3] = 5394, [4] = 8835 }   -- one totem of each element, for the icon
+	local rows = {}
+	local function refreshOrder()
+		local order = ns.fixOrder()
+		for i, row in ipairs(rows) do
+			local slot = order[i]
+			local tex = C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(SAMPLE_SPELL[slot])
+			row.icon:SetTexture(tex or "Interface\\Icons\\INV_Misc_QuestionMark")
+			row.label:SetText(i .. ".  " .. (ns.SLOT_NAMES[slot] or ("Slot " .. slot)))
+			row.up:SetEnabled(i > 1)
+			row.down:SetEnabled(i < #rows)
+		end
+	end
+	for i = 1, #ns.fixOrder() do
+		local row = {}
+		local y = -112 - (i - 1) * 32
+		row.icon = panel:CreateTexture(nil, "ARTWORK")
+		row.icon:SetSize(26, 26)
+		row.icon:SetPoint("TOPLEFT", 330, y)
+		row.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+		row.label = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+		row.label:SetPoint("LEFT", row.icon, "RIGHT", 8, 0)
+		row.label:SetWidth(70)
+		row.label:SetJustifyH("LEFT")
+		row.up = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+		row.up:SetSize(52, 22)
+		row.up:SetPoint("LEFT", row.label, "RIGHT", 6, 0)
+		row.up:SetText("Up")
+		row.up:SetScript("OnClick", function() ns.moveSlot(i, -1); refreshOrder() end)
+		row.down = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+		row.down:SetSize(52, 22)
+		row.down:SetPoint("LEFT", row.up, "RIGHT", 4, 0)
+		row.down:SetText("Down")
+		row.down:SetScript("OnClick", function() ns.moveSlot(i, 1); refreshOrder() end)
+		rows[i] = row
+	end
+	local resetOrder = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+	resetOrder:SetSize(140, 24)
+	resetOrder:SetPoint("TOPLEFT", 330, -112 - #rows * 32 - 6)
+	resetOrder:SetText("Reset order")
+	resetOrder:SetScript("OnClick", function() ns.resetOrder(); refreshOrder() end)
+
 	local reset = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
 	reset:SetSize(140, 24)
 	reset:SetPoint("TOPLEFT", 16, -520)
@@ -115,6 +164,7 @@ function ns.buildOptions()
 	local function refresh()
 		for _, c in ipairs(controls) do c.refresh() end
 		dependents()
+		refreshOrder()
 	end
 	panel:SetScript("OnShow", function()
 		refresh()
@@ -132,6 +182,7 @@ function ns.buildOptions()
 		for k, v in pairs(ns.defaults) do
 			if k ~= "point" and k ~= "relPoint" and k ~= "x" and k ~= "y" then db[k] = v end
 		end
+		db.order = ns.defaultOrder()
 		refresh()
 		ns.updatePreview()
 	end
