@@ -25,6 +25,24 @@ local function checkbox(parent, label, key, x, y)
 	return cb
 end
 
+-- A round radio button in the stock look (the same art as the game's own option panels).
+local function radio(parent, label, x, y, onClick)
+	local rb = CreateFrame("CheckButton", nil, parent)
+	rb:SetSize(20, 20)
+	rb:SetPoint("TOPLEFT", x, y)
+	rb:SetNormalTexture("Interface\\Buttons\\UI-RadioButton")
+	rb:GetNormalTexture():SetTexCoord(0, 0.25, 0, 1)
+	rb:SetHighlightTexture("Interface\\Buttons\\UI-RadioButton", "ADD")
+	rb:GetHighlightTexture():SetTexCoord(0.5, 0.75, 0, 1)
+	rb:SetCheckedTexture("Interface\\Buttons\\UI-RadioButton")
+	rb:GetCheckedTexture():SetTexCoord(0.25, 0.5, 0, 1)
+	local text = rb:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+	text:SetPoint("LEFT", rb, "RIGHT", 4, 1)
+	text:SetText(label)
+	rb:SetScript("OnClick", function() PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON); onClick() end)
+	return rb
+end
+
 local function slider(parent, label, key, lo, hi, x, y)
 	local title = parent:CreateFontString(nil, "ARTWORK", "GameFontNormal")
 	title:SetPoint("TOPLEFT", x, y)
@@ -81,11 +99,10 @@ function ns.buildOptions()
 		checkbox(panel, "Show time left", "showTimer", 16, -210),
 		checkbox(panel, "Show range mark (check / cross)", "showRange", 16, -240),
 		checkbox(panel, "Tint the icon red when out of range", "tint", 16, -270),
-		checkbox(panel, "Show exact distance under each totem", "showDistance", 16, -300),
-		checkbox(panel, "Replace the default totem timers (stays under the player frame)", "attach", 16, -330),
-		slider(panel, "Position left / right", "attachX", -200, 300, 40, -365),
-		slider(panel, "Position up / down", "attachY", -100, 100, 40, -420),
-		checkbox(panel, "Unlock frame (drag it to move)", "locked", 16, -475),
+		checkbox(panel, "Replace the default totem timers (stays under the player frame)", "attach", 16, -300),
+		slider(panel, "Position left / right", "attachX", -200, 300, 40, -335),
+		slider(panel, "Position up / down", "attachY", -100, 100, 40, -390),
+		checkbox(panel, "Unlock frame (drag it to move)", "locked", 16, -445),
 	}
 	-- "locked" is stored the other way round to how the box reads
 	local unlock = controls[#controls]
@@ -144,14 +161,38 @@ function ns.buildOptions()
 	resetOrder:SetText("Reset order")
 	resetOrder:SetScript("OnClick", function() ns.resetOrder(); refreshOrder() end)
 
+	-- How the distance to each totem is shown under it.
+	local distTitle = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+	distTitle:SetPoint("TOPLEFT", 330, -112 - #rows * 32 - 50)
+	distTitle:SetText("Distance under each totem")
+	local MODES = {
+		{ "bar", "Range bar  (room left in its range)" },
+		{ "yards", "Exact yards" },
+		{ "off", "Nothing" },
+	}
+	local radios = {}
+	local function refreshDistance()
+		local now = ns.distMode()
+		for _, r in ipairs(radios) do r.rb:SetChecked(r.mode == now) end
+	end
+	for i, m in ipairs(MODES) do
+		local rb = radio(panel, m[2], 330, -112 - #rows * 32 - 74 - (i - 1) * 24, function()
+			ns.get().distanceMode = m[1]
+			refreshDistance()
+			ns.updatePreview()
+		end)
+		rb.mode = m[1]
+		radios[i] = { rb = rb, mode = m[1] }
+	end
+
 	local reset = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
 	reset:SetSize(140, 24)
-	reset:SetPoint("TOPLEFT", 16, -520)
+	reset:SetPoint("TOPLEFT", 16, -490)
 	reset:SetText("Reset position")
 	reset:SetScript("OnClick", ns.resetPosition)
 
 	-- offsets only matter while attached; dragging only while detached
-	local attach, offX, offY = controls[8], controls[9], controls[10]
+	local attach, offX, offY = controls[7], controls[8], controls[9]
 	local function enable(c, on)
 		c:SetEnabled(on)
 		c:SetAlpha(on and 1 or 0.5)
@@ -165,6 +206,7 @@ function ns.buildOptions()
 		for _, c in ipairs(controls) do c.refresh() end
 		dependents()
 		refreshOrder()
+		refreshDistance()
 	end
 	panel:SetScript("OnShow", function()
 		refresh()

@@ -18,7 +18,7 @@ ns.defaults = {
 	vertical = false,
 	showTimer = true,
 	showRange = true,
-	showDistance = false,
+	distanceMode = "bar",   -- how far you are from each totem: "bar" (room left in its radius), "yards" (exact number) or "off"
 	tint = true,
 	locked = true,
 	attach = false,        -- replace the default totem timers and sit under the player frame
@@ -253,6 +253,24 @@ local function newButton(slot)
 	b.dist:SetShadowOffset(1, -1)
 	b.dist:Hide()
 
+	-- Range bar: a thin status bar in the style of the default unit-frame bars, showing how much room is left
+	-- inside the totem's radius (full = standing on it, empty = at the edge or beyond). Under the icon, or along
+	-- its right side in a vertical bar.
+	local g = CreateFrame("StatusBar", nil, b.over)
+	g:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
+	g:SetMinMaxValues(0, 1)
+	g:SetValue(0)
+	g.edge = g:CreateTexture(nil, "BACKGROUND", nil, -2)       -- 1 px frame, darkened (red when out of range)
+	g.edge:SetTexture("Interface\\Tooltips\\UI-Tooltip-Background")
+	g.edge:SetPoint("TOPLEFT", -1, 1)
+	g.edge:SetPoint("BOTTOMRIGHT", 1, -1)
+	g.back = g:CreateTexture(nil, "BACKGROUND", nil, -1)       -- empty part of the bar
+	g.back:SetTexture("Interface\\Tooltips\\UI-Tooltip-Background")
+	g.back:SetAllPoints()
+	g.back:SetVertexColor(0.1, 0.1, 0.1, 0.9)
+	g:Hide()
+	b.gauge = g
+
 	b:EnableMouse(false)
 	b:Hide()
 	return b
@@ -283,18 +301,37 @@ local function newHit(slot, b)
 	return h
 end
 
+local GAUGE_GAP = 3
+local function sizeGauge(b)
+	local g, s = b.gauge, db.size
+	local thick = math.max(5, math.floor(s * 0.16 + 0.5))
+	g:ClearAllPoints()
+	if db.vertical then
+		g:SetOrientation("VERTICAL")
+		g:SetPoint("TOPLEFT", b, "TOPRIGHT", GAUGE_GAP, 0)
+		g:SetPoint("BOTTOMLEFT", b, "BOTTOMRIGHT", GAUGE_GAP, 0)
+		g:SetWidth(thick)
+	else
+		g:SetOrientation("HORIZONTAL")
+		g:SetPoint("TOPLEFT", b, "BOTTOMLEFT", 0, -GAUGE_GAP)
+		g:SetPoint("TOPRIGHT", b, "BOTTOMRIGHT", 0, -GAUGE_GAP)
+		g:SetHeight(thick)
+	end
+end
+
 local function sizeButton(b)
 	local s = db.size
 	b:SetSize(s, s)
 	b.border:SetSize(s * 66 / 36, s * 66 / 36)
 	b.mark:SetSize(s * 0.5, s * 0.5)
+	sizeGauge(b)
 end
 
 local layoutPending = false
 local function layout()
 	if InCombatLockdown() then layoutPending = true return end   -- the hit buttons can't move in combat
 	layoutPending = false
-	local want, order = db.order, {}
+	local want, order = fixOrder(), {}
 	for _, slot in ipairs(want) do if buttons[slot]:IsShown() then order[#order + 1] = slot end end
 	local n = #order
 	-- slots without a totem are parked after the shown ones: a totem that appears mid-fight lands on its own spot
@@ -326,8 +363,15 @@ local function setMark(b, r)
 	b.mark:Show()
 end
 
+local function distMode()
+	local m = db.distanceMode
+	if m == "yards" or m == "off" then return m end
+	return "bar"   -- the default; also what a damaged value means
+end
+ns.distMode = distMode
+
 local function setDistance(b, dist, r)
-	if not db.showDistance or not dist then b.dist:Hide() return end
+	if not dist then b.dist:Hide() return end
 	b.dist:ClearAllPoints()
 	if db.vertical then b.dist:SetPoint("LEFT", b, "RIGHT", 4, 0)
 	else b.dist:SetPoint("TOP", b, "BOTTOM", 0, -2) end
@@ -336,11 +380,44 @@ local function setDistance(b, dist, r)
 	b.dist:Show()
 end
 
--- Called every tick for every shown totem, so it only touches the screen when what is drawn would change:
--- the mark, the tint and the distance text (to a tenth of a yard) are each remembered on the button.
-local function invalidate(b) b.pc, b.psr, b.pt, b.pd, b.pdc, b.pdv = nil, nil, nil, nil, nil, nil end
+-- The bar's colours: plenty of room left / getting close to the edge / nearly out. Out of range is an empty bar
+-- with a red frame.
+local GREEN, YELLOW, ORANGE = { 0.1, 0.8, 0.15 }, { 1, 0.82, 0 }, { 0.95, 0.4, 0.05 }
+local EDGE_OK, EDGE_OUT = { 0, 0, 0, 0.9 }, { 0.85, 0.1, 0.1, 1 }
 
-local function paintRange(b, r, dist)
+local function paintGauge(b, r, dist, range)
+	local g = b.gauge
+	if not (dist and range and range > 0) then
+		if b.pg ~= -1 then b.pg = -1; g:Hide() end
+		return
+	end
+	local len = db.size
+	local frac = 1 - dist / range
+	if frac < 0 then frac = 0 end
+	local step = math.floor(frac * len + 0.5)          -- one step per pixel of bar: nothing to redraw between
+	local out = r == false
+	local bucket = out and 3 or (frac >= 0.5 and 0 or (frac >= 0.25 and 1 or 2))
+	if b.pg == -1 or b.pg == nil then g:Show() end
+	if b.pg ~= step then
+		b.pg = step
+		g:SetValue(step / len)
+	end
+	if b.pgb ~= bucket then
+		b.pgb = bucket
+		local c = bucket == 0 and GREEN or (bucket == 1 and YELLOW or ORANGE)
+		g:SetStatusBarColor(c[1], c[2], c[3])
+		local e = out and EDGE_OUT or EDGE_OK
+		g.edge:SetVertexColor(e[1], e[2], e[3], e[4])
+	end
+end
+
+-- Called every tick for every shown totem, so it only touches the screen when what is drawn would change:
+-- the mark, the tint, the bar (one step per pixel) and the distance text (a tenth of a yard) are each remembered.
+local function invalidate(b)
+	b.pc, b.psr, b.pt, b.pd, b.pdc, b.pdv, b.pg, b.pgb, b.pm = nil, nil, nil, nil, nil, nil, nil, nil, nil
+end
+
+local function paintRange(b, r, dist, range)
 	local c = r == nil and 0 or (r and 1 or 2)
 	local showRange = db.showRange and true or false
 	if b.pc ~= c or b.psr ~= showRange then
@@ -352,11 +429,22 @@ local function paintRange(b, r, dist)
 		b.pt = tint
 		if tint then b.icon:SetVertexColor(unpack(OUT_COLOR)) else b.icon:SetVertexColor(1, 1, 1) end
 	end
-	local tenth = (db.showDistance and dist) and math.floor(dist * 10 + 0.5) or -1
-	local vertical = db.vertical and true or false
-	if b.pd ~= tenth or b.pdc ~= c or b.pdv ~= vertical then
-		b.pd, b.pdc, b.pdv = tenth, c, vertical
-		setDistance(b, dist, r)
+	local mode = distMode()
+	if b.pm ~= mode then          -- the setting changed: clear whichever display is not wanted
+		b.pm = mode
+		b.pd, b.pdc, b.pdv, b.pg, b.pgb = nil, nil, nil, nil, nil
+		if mode ~= "bar" then b.gauge:Hide() end
+		if mode ~= "yards" then b.dist:Hide() end
+	end
+	if mode == "bar" then
+		paintGauge(b, r, dist, range)
+	elseif mode == "yards" then
+		local tenth = dist and math.floor(dist * 10 + 0.5) or -1
+		local vertical = db.vertical and true or false
+		if b.pd ~= tenth or b.pdc ~= c or b.pdv ~= vertical then
+			b.pd, b.pdc, b.pdv = tenth, c, vertical
+			setDistance(b, dist, r)
+		end
 	end
 end
 
@@ -408,6 +496,7 @@ local function refreshSlot(slot, placed)
 	if not have then
 		state[slot] = nil
 		invalidate(b)
+		b.gauge:Hide()
 		b:Hide()
 		return
 	end
@@ -479,7 +568,7 @@ local function tick()
 				any = true
 				if have then noticeReplaced(slot, visible, start) end
 				local r, _, d = rangeOf(slot, now)
-				paintRange(b, r, d)
+				paintRange(b, r, d, state[slot] and state[slot].range)
 			end
 		end
 	end
@@ -495,6 +584,7 @@ local SAMPLE = {
 }
 
 local SAMPLE_DIST = { 6.2, 14.8, 41.3, 22.5 }
+local SAMPLE_RANGE = { 20, 30, 30, 30 }   -- Searing 20 yd, the buff totems 30: shows full, half, empty and nearly-out
 
 local function showPreview()
 	previewing = true
@@ -508,7 +598,7 @@ local function showPreview()
 		sizeButton(b)
 		invalidate(b)
 		b:Show()
-		paintRange(b, slot ~= 3, SAMPLE_DIST[slot])   -- one shown out of range so the look can be judged
+		paintRange(b, slot ~= 3, SAMPLE_DIST[slot], SAMPLE_RANGE[slot])   -- one shown out of range so the look can be judged
 	end
 	layout()
 	bar:Show()

@@ -7,6 +7,12 @@ for _, k in ipairs({ "__lt", "__le", "__add", "__sub", "__mul", "__div", "__conc
 SECRET.__tostring = function() return "<secret>" end
 local function secret() return setmetatable({}, SECRET) end
 issecretvalue = function(v) return type(v) == "table" and getmetatable(v) == SECRET end
+local realPrint, printedErrors = print, {}
+print = function(...)
+	local line = table.concat({ ... }, " ")
+	if line:find("hit an error", 1, true) then printedErrors[#printedErrors + 1] = line end
+	realPrint(...)
+end
 local scripts = {}
 CALLS = setmetatable({}, { __index = function() return 0 end })
 local function mock(kind)
@@ -32,11 +38,14 @@ local function mock(kind)
 		if k == "GetChecked" then return function(self) return self.checked end end
 		if k == "EnableMouse" then return function(self, v) self.mouse = v end end
 		if k == "SetChecked" then return function(self, v) self.checked = v end end
-		if k == "SetValue" then return function(self, v) self.value = v; if self.scripts.OnValueChanged then self.scripts.OnValueChanged(self, v) end end end
+		if k == "SetValue" then return function(self, v) CALLS.SetValue = CALLS.SetValue + 1; self.value = v; if self.scripts.OnValueChanged then self.scripts.OnValueChanged(self, v) end end end
 		if k == "SetText" then return function(self, v) CALLS.SetText = CALLS.SetText + 1; self.text = v end end
 		if k == "SetTextColor" then return function(self, ...) CALLS.SetTextColor = CALLS.SetTextColor + 1; self.color = { ... } end end
 		if k == "SetVertexColor" then return function(self, ...) CALLS.SetVertexColor = CALLS.SetVertexColor + 1; self.color = { ... } end end
 		if k == "SetTexture" then return function(self, v) CALLS.SetTexture = CALLS.SetTexture + 1; self.tex = v end end
+		if k == "GetNormalTexture" or k == "GetHighlightTexture" or k == "GetCheckedTexture" then return function() return mock("region") end end
+		if k == "SetOrientation" then return function(self, v) self.orientation = v end end
+		if k == "SetStatusBarColor" then return function(self, ...) self.sbcolor = { ... } end end
 		if k == "SetPoint" then return function(self, ...) self.anchor = { ... } end end
 		if k == "SetSize" then return function(self, w, h) self.w, self.h = w, h end end
 		if k == "SetCooldown" then return function(self, s, d) self.cd = { s, d } end end
@@ -322,24 +331,24 @@ check(pts[#pts][2] == UIParent, "bar back on its saved screen position")
 -- exact distance under each totem
 pos = { y = 100, x = 100, map = 1 }; fire("PLAYER_ENTERING_WORLD"); fire("PLAYER_TOTEM_UPDATE", 2)
 pos = { y = 100, x = 112.4, map = 1 }
-TotemRangeDB.showDistance = false; tick()
+TotemRangeDB.distanceMode = "off"; tick()
 check(not btn(2).dist.shown, "distance hidden when the option is off")
-TotemRangeDB.showDistance = true; tick()
+TotemRangeDB.distanceMode = "yards"; tick()
 check(btn(2).dist.shown and btn(2).dist.text == "12.4 yd", "shows 12.4 yd: " .. tostring(btn(2).dist.text))
 pos = { y = 100, x = 145, map = 1 }; tick()
 check(btn(2).dist.text == "45.0 yd" and btn(2).dist.color[1] > 0.9 + 0 - 0.0 , "45 yd, red when out of range")
 pos = nil; tick()
 check(not btn(2).dist.shown, "no distance shown when only the buff is known")
-TotemRangeDB.showDistance = false
+TotemRangeDB.distanceMode = "off"
 
 SlashCmdList.TOTEMRANGE("unlock")
 check(TotemRangeDB.locked == false and bar().shown, "/totemrange unlock shows the frame")
 -- the exact bug from the field: left unlocked, real totems must still be tracked (not replaced by samples)
 fire("PLAYER_ENTERING_WORLD"); pos = { y = 5, x = 5, map = 1 }; fire("PLAYER_TOTEM_UPDATE", 2)
-pos = { y = 5, x = 80, map = 1 }; TotemRangeDB.showDistance = true; tick()
+pos = { y = 5, x = 80, map = 1 }; TotemRangeDB.distanceMode = "yards"; tick()
 check(btn(2).shown and not btn(1).shown and not btn(3).shown, "unlocked with a real totem out: only the real totem shows")
 check(btn(2).dist.text == "75.0 yd" and btn(2).mark.tex:find("NotReady"), "unlocked: real distance (75.0 yd) and red, not sample numbers")
-TotemRangeDB.showDistance = false
+TotemRangeDB.distanceMode = "off"
 -- Totemic Recall while unlocked: every totem goes, nothing fake appears in its place
 local keep = totems
 totems = {}
@@ -399,7 +408,7 @@ for _, mode in ipairs({ true, "all" }) do
 		fire("PLAYER_REGEN_DISABLED"); fire("PLAYER_REGEN_ENABLED")
 		fire("PLAYER_ENTERING_WORLD")
 		for _ = 1, 3 do tick() end
-		TotemRangeDB.showDistance = true; tick(); TotemRangeDB.showDistance = false
+		TotemRangeDB.distanceMode = "yards"; tick(); TotemRangeDB.distanceMode = "off"
 		SlashCmdList.TOTEMRANGE("status")
 		if btn(1).scripts.OnEnter then btn(1).scripts.OnEnter(btn(1)) end
 	end)
@@ -408,6 +417,66 @@ for _, mode in ipairs({ true, "all" }) do
 	secretMode = false; secretPos = false; inCombat = false
 end
 
+
+-- ---- the range bar (default): how much room is left inside the totem's radius
+do
+	local function g(slot) return btn(slot).gauge end
+	local function near(a, b) return math.abs(a - b) < 0.03 end
+	totems = { [2] = { name = "Strength of Earth Totem II", start = t, dur = 300, icon = 8 } }   -- radius 30
+	secretMode = false; secretPos = false; inCombat = false
+	TotemRangeDB.distanceMode = nil; TotemRangeDB.vertical = false
+	pos = { y = 0, x = 0, map = 1 }
+	fire("PLAYER_ENTERING_WORLD"); fire("PLAYER_TOTEM_UPDATE", 2); tick()
+	check(ns.distMode() == "bar", "the bar is the default (and what an unset value means)")
+	check(g(2).shown and near(g(2).value, 1) and g(2).sbcolor[2] > 0.7 and g(2).sbcolor[1] < 0.3, "standing on the totem: full green bar")
+	check(not btn(2).dist.shown, "bar mode: no yards text")
+	pos = { y = 0, x = 20, map = 1 }; tick()
+	check(near(g(2).value, 1 / 3) and g(2).sbcolor[1] > 0.9 and g(2).sbcolor[2] > 0.7, "20 of 30 yd: a third left, yellow")
+	pos = { y = 0, x = 25, map = 1 }; tick()
+	check(near(g(2).value, 1 / 6) and g(2).sbcolor[1] > 0.9 and g(2).sbcolor[2] < 0.5, "25 of 30 yd: nearly out, orange")
+	check(g(2).edge.color[1] < 0.3, "...frame still dark while in range")
+	pos = { y = 0, x = 31, map = 1 }; tick()
+	check(g(2).value == 0 and g(2).edge.color[1] > 0.7 and g(2).edge.color[2] < 0.3, "31 yd: empty bar with a red frame")
+	pos = { y = 0, x = 200, map = 1 }; tick()
+	check(g(2).value == 0 and g(2).shown, "far away: still just empty (never negative, never beyond)")
+	pos = { y = 0, x = 0, map = 1 }; tick()
+	check(near(g(2).value, 1) and g(2).edge.color[1] < 0.3, "back on it: full again, frame dark again")
+	pos = nil; tick()
+	check(not g(2).shown, "position unknown (only the buff to go on): no bar at all, the mark says it")
+	pos = { y = 0, x = 0, map = 1 }; tick()
+	check(g(2).shown, "...and it returns when the position does")
+	-- modes
+	TotemRangeDB.distanceMode = "yards"; ns.updatePreview(); pos = { y = 0, x = 12.4, map = 1 }; tick()
+	check(not g(2).shown and btn(2).dist.shown and btn(2).dist.text == "12.4 yd", "yards mode: the number, no bar")
+	TotemRangeDB.distanceMode = "off"; ns.updatePreview(); tick()
+	check(not g(2).shown and not btn(2).dist.shown, "off: neither")
+	TotemRangeDB.distanceMode = "bar"; ns.updatePreview(); tick()
+	check(g(2).shown and not btn(2).dist.shown, "back to the bar: bar only")
+	TotemRangeDB.distanceMode = "garbage"
+	check(ns.distMode() == "bar", "a damaged setting means the bar")
+	TotemRangeDB.distanceMode = "bar"
+	-- layout direction and size
+	check(g(2).orientation == "HORIZONTAL", "horizontal bar: the range bar runs left to right under the icon")
+	TotemRangeDB.vertical = true; ns.apply(); tick()
+	check(g(2).orientation == "VERTICAL", "vertical bar: the range bar stands on the icon's right side")
+	TotemRangeDB.vertical = false; ns.apply()
+	-- the settings radio buttons
+	local radios = {}
+	for _, f in ipairs(frames) do if f.mode and f.scripts.OnClick then radios[f.mode] = f end end
+	check(radios.bar and radios.yards and radios.off, "settings: three choices (range bar, exact yards, nothing)")
+	radios.yards.scripts.OnClick(radios.yards)
+	check(TotemRangeDB.distanceMode == "yards" and radios.yards.checked and not radios.bar.checked, "clicking 'Exact yards' selects it and unticks the others")
+	radios.off.scripts.OnClick(radios.off); radios.bar.scripts.OnClick(radios.bar)
+	check(TotemRangeDB.distanceMode == "bar" and radios.bar.checked and not radios.off.checked, "clicking 'Range bar' selects it")
+	-- the preview while the settings are open and nothing is out: four different fills so the look can be judged
+	totems = {}; fire("PLAYER_TOTEM_UPDATE", 2); ns.optionsOpen = true; ns.updatePreview()
+	check(near(g(1).value, 0.69) and near(g(2).value, 0.51) and g(3).value == 0 and near(g(4).value, 0.25),
+		("preview: Searing 0.69, Strength 0.51, one empty, one nearly out (%.2f %.2f %.2f %.2f)"):format(g(1).value, g(2).value, g(3).value, g(4).value))
+	check(g(3).edge.color[1] > 0.7, "preview: the out-of-range sample has the red frame")
+	ns.optionsOpen = false; ns.updatePreview()
+	check(not g(1).shown and not g(2).shown and not g(3).shown and not g(4).shown, "settings closed, no totems: no bars left behind")
+	TotemRangeDB.distanceMode = "off"
+end
 
 -- ---- order: earth, fire, water, air like the default totem bar; reorderable; damaged data falls back
 do
@@ -480,7 +549,7 @@ do
 		[3] = { name = "Mana Spring Totem", start = t, dur = 300, icon = 9 }, [4] = { name = "Windfury Totem", start = t, dur = 300, icon = 10 } }
 	secretMode = false; secretPos = false; inCombat = false; mapOn = true
 	pos = { y = 0, x = 0, map = 1 }
-	TotemRangeDB.showDistance = true; TotemRangeDB.showRange = true
+	TotemRangeDB.distanceMode = "bar"; TotemRangeDB.showRange = true
 	fire("PLAYER_ENTERING_WORLD"); for slot = 1, 4 do fire("PLAYER_TOTEM_UPDATE", slot) end
 	for _ = 1, 20 do tick() end
 	local counts = { UnitPosition = 0, GetTotemInfo = 0, GetPlayerMapPosition = 0 }
@@ -506,7 +575,7 @@ do
 		kb, per(counts.UnitPosition), per(counts.GetPlayerMapPosition), per(counts.GetTotemInfo), per(CALLS.SetTexture), per(CALLS.SetVertexColor), per(CALLS.SetText), per(CALLS.SetTextColor)))
 	COST = { kb = kb, up = per(counts.UnitPosition), map = per(counts.GetPlayerMapPosition), info = per(counts.GetTotemInfo),
 		tex = per(CALLS.SetTexture), col = per(CALLS.SetVertexColor), txt = per(CALLS.SetText) }
-	TotemRangeDB.showDistance = false
+	TotemRangeDB.distanceMode = "off"
 	check(COST.kb < 2, ("cost: under 2 KB of garbage per tick (was 4.2): %.2f"):format(COST.kb))
 	check(COST.up <= 1.01 and COST.map < 0.1, ("cost: one position read per tick, map only when a range edge is crossed (%.3f)"):format(COST.map))
 	check(COST.info <= 4.01, "cost: one GetTotemInfo per totem per tick (was two)")
@@ -523,5 +592,6 @@ do
 	check(not bar().shown, "cost: when the last totem expires the bar hides, so the tick stops")
 end
 
+check(#printedErrors == 0, "the addon never printed an error line during the whole run" .. (printedErrors[1] and (": " .. printedErrors[1]) or ""))
 print(fails == 0 and "ALL PASSED" or (fails .. " FAILED"))
 os.exit(fails == 0 and 0 or 1)
