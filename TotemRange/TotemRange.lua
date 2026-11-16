@@ -590,8 +590,33 @@ local function onTotemCast(id)
 	end)
 end
 
+-- Safety net. The bar only learns about a totem from PLAYER_TOTEM_UPDATE, and its own tick stops while the
+-- bar is hidden (which is exactly when it is empty). If an event is ever missed, a totem that is out would
+-- stay invisible until combat ends or a loading screen. So a frame that is never hidden looks for totems
+-- the bar does not show. Position unknown => the "?" mark, never a guessed in/out of range.
+local function rescan()
+	if previewing or not bar then return end
+	local found = false
+	for slot = 1, MAX_SLOTS do
+		if not buttons[slot]:IsShown() and readSlot(slot) == true then
+			dbg("RESCAN found slot %d showing nothing (missed event); showing it with unknown range", slot)
+			refreshSlot(slot)
+			found = true
+		end
+	end
+	if found then layout() updateShown() tick() end
+end
+local guardedRescan = guard("rescan", rescan)
+
 local reportedUnlocked = false
 local ev = CreateFrame("Frame")
+do
+	local acc = 0
+	ev:SetScript("OnUpdate", function(_, elapsed)
+		acc = acc + elapsed
+		if acc >= 0.5 then acc = 0; guardedRescan() end
+	end)
+end
 ev:RegisterEvent("ADDON_LOADED")
 ev:SetScript("OnEvent", guard("event", function(self, event, arg1, ...)
 	if event == "ADDON_LOADED" and arg1 == ADDON then
@@ -654,7 +679,10 @@ ev:SetScript("OnEvent", guard("event", function(self, event, arg1, ...)
 			if previewing then layout() else refreshAll() end   -- catch what changed during the fight; make new totems clickable
 		end
 	elseif event == "PLAYER_TOTEM_UPDATE" then
-		if not readable(arg1) then return end
+		if not readable(arg1) then
+			dbg("PLAYER_TOTEM_UPDATE with an unreadable slot: the rescan will pick it up")
+			return
+		end
 		if previewing then
 			if not anyRealTotem() then return end
 			endPreview()   -- a real totem is out: drop the samples first

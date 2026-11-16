@@ -355,6 +355,31 @@ SlashCmdList.TOTEMRANGE("")
 check(savedCat.opened == 7, "/totemrange opens the settings")
 SlashCmdList.TOTEMRANGE("status")
 
+-- ---- a totem that is out but whose event never reached us (the "nothing showed, then it came back" bug)
+do
+	local function rescan() ev.scripts.OnUpdate(ev, 0.6) end
+	totems = {}; secretMode = false; inCombat = false
+	for slot = 1, 4 do fire("PLAYER_TOTEM_UPDATE", slot) end
+	check(not bar().shown, "rescan setup: empty bar is hidden (so its own tick is not running)")
+	totems = { [3] = { name = "Windfury Totem", start = t, dur = 300, icon = 8 } }   -- placed, NO event fired
+	pos = { y = 0, x = 0, map = 1 }
+	rescan()
+	check(btn(3).shown and bar().shown, "missed event: the rescan shows the totem anyway")
+	local logged = false
+	for _, line in ipairs(TotemRangeDB.log or {}) do if line:find("RESCAN found slot 3") then logged = true end end
+	check(logged, "...and logs that it caught a missed event")
+	-- it must not invent a position: with none recorded the mark is the unknown one, never a green "in range"
+	check(not btn(3).mark.tex:find("Ready") or btn(3).mark.tex:find("NotReady"), "...with unknown range, not a guessed green tick")
+	totems = {}
+	for slot = 1, 4 do fire("PLAYER_TOTEM_UPDATE", slot) end
+	rescan()
+	check(not btn(3).shown and not bar().shown, "totem gone: the rescan does not bring it back")
+	-- and while the preview is on it leaves the samples alone
+	totems = { [1] = { name = "Searing Totem III", start = t, dur = 60, icon = 7 } }
+	rescan(); for slot = 1, 4 do fire("PLAYER_TOTEM_UPDATE", slot) end
+	totems = {}
+end
+
 -- ---- combat: every reading is secret. Nothing may raise, the log must hold no ERROR, marks must say "?"
 noErrors("no errors logged during the whole normal run")
 
