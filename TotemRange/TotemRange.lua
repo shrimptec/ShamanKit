@@ -581,7 +581,9 @@ local function updateShown()
 	local any = false
 	for slot = 1, MAX_SLOTS do if buttons[slot]:IsShown() then any = true end end
 	bar.anyShown = any
-	bar:SetShown(any or (ns.optionsOpen and true or false))
+	-- The bar frame itself is never shown or hidden: the secure click buttons are anchored to it, which makes it
+	-- restricted in combat (touching it then is what raises the game's "action blocked" popup). When no totem is
+	-- out, everything on it is hidden, so an empty bar is simply invisible.
 	ns.refreshHolders()
 end
 
@@ -605,7 +607,7 @@ local function noticeReplaced(slot, visible, start)
 end
 
 local function tick()
-	if previewing then return end
+	if previewing or not bar.anyShown then return end   -- nothing out: nothing to read (the rescan notices a new totem)
 	local any, cleared = false, false
 	local now = tickPos()
 	for slot = 1, MAX_SLOTS do
@@ -656,7 +658,6 @@ local function showPreview()
 		end
 	end
 	layout()
-	bar:Show()
 end
 
 local function endPreview()
@@ -684,6 +685,13 @@ local function setBlizzardHidden(hide)
 	for _, child in ipairs({ TotemFrame:GetChildren() }) do
 		if child.EnableMouse and not (child.IsProtected and child:IsProtected()) then child:EnableMouse(not hide) end
 	end
+end
+
+local mousePending = false
+local function applyBarMouse()
+	if InCombatLockdown() then mousePending = true return end
+	mousePending = false
+	bar:EnableMouse(db.locked == false and not db.attach)
 end
 
 local attachPending = false
@@ -723,7 +731,7 @@ end
 function ns.apply()
 	if not bar then return end
 	if previewing then showPreview() else refreshAll() end
-	bar:EnableMouse(db.locked == false)
+	applyBarMouse()
 end
 
 -- Sample totems are only for an empty bar: real totems always win, so being unlocked or having the
@@ -737,7 +745,7 @@ end
 
 function ns.updatePreview()
 	applyAttach()
-	bar:EnableMouse(db.locked == false and not db.attach)
+	applyBarMouse()
 	local want = ns.optionsOpen and not anyRealTotem()   -- samples: only a live preview while the panel is open
 	if want and not previewing then showPreview()
 	elseif not want and previewing then endPreview()
@@ -848,7 +856,7 @@ local function rescan()
 end
 local guardedRescan = guard("rescan", rescan)
 
-local reportedUnlocked = false
+local reportedUnlocked, reportedBlocked = false, false
 local ev = CreateFrame("Frame")
 do
 	local acc = 0
@@ -878,6 +886,8 @@ ev:SetScript("OnEvent", guard("event", function(self, event, arg1, ...)
 		self:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
 		self:RegisterEvent("PLAYER_REGEN_DISABLED")
 		self:RegisterEvent("PLAYER_REGEN_ENABLED")
+		self:RegisterEvent("ADDON_ACTION_BLOCKED")
+		self:RegisterEvent("ADDON_ACTION_FORBIDDEN")
 		if ns.buildOptions then ns.buildOptions() end
 	elseif event == "PLAYER_ENTERING_WORLD" then
 		for slot in pairs(state) do state[slot] = nil end   -- loading screen: positions mean nothing now
@@ -901,6 +911,16 @@ ev:SetScript("OnEvent", guard("event", function(self, event, arg1, ...)
 				dbg("MOVED slot %d %s by spell %d to %s", slot, tostring(st.name), id, describe(at))
 			end
 		end
+	elseif event == "ADDON_ACTION_BLOCKED" or event == "ADDON_ACTION_FORBIDDEN" then
+		if arg1 == ADDON then
+			local what = ...
+			dbg("%s: %s | combat=%s | %s", event, tostring(what), tostring(InCombatLockdown()),
+				(debugstack and tostring(debugstack(2, 6, 0)) or "-"):gsub("\n", " < "))
+			if not reportedBlocked then
+				reportedBlocked = true
+				print("|cff33ff99TotemRange|r: the game blocked an action (" .. tostring(what) .. "); details are in the addon's log.")
+			end
+		end
 	elseif event == "PLAYER_REGEN_ENABLED" and self.deferredBuild then
 		self.deferredBuild = nil
 		build()
@@ -908,6 +928,8 @@ ev:SetScript("OnEvent", guard("event", function(self, event, arg1, ...)
 		self:RegisterEvent("PLAYER_TOTEM_UPDATE")
 		self:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
 		self:RegisterEvent("PLAYER_REGEN_DISABLED")
+		self:RegisterEvent("ADDON_ACTION_BLOCKED")
+		self:RegisterEvent("ADDON_ACTION_FORBIDDEN")
 		if ns.buildOptions then ns.buildOptions() end
 		refreshAll()
 	elseif event == "PLAYER_REGEN_DISABLED" or event == "PLAYER_REGEN_ENABLED" then
@@ -918,6 +940,7 @@ ev:SetScript("OnEvent", guard("event", function(self, event, arg1, ...)
 		for slot in pairs(state) do state[slot].last = nil end
 		if event == "PLAYER_REGEN_ENABLED" then
 			if attachPending then applyAttach() end
+			if mousePending then applyBarMouse() end
 			if previewing then layout() else refreshAll() end   -- catch what changed during the fight; make new totems clickable
 		end
 	elseif event == "PLAYER_TOTEM_UPDATE" then

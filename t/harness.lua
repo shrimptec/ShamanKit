@@ -141,16 +141,19 @@ local function noErrors(msg)
 end
 
 fire("ADDON_LOADED", "TotemRange")
+-- The bar is the anchor of the secure click buttons, so the real client treats it as restricted in combat:
+-- insecure code may not show, hide, move or resize it then (this is what the "action blocked" popup is about).
+rawset(_G.TotemRangeBar, "protected", true)
 check(TotemRangeDB and TotemRangeDB.size == 36, "defaults filled")
 check(savedCat ~= nil, "settings category registered")
 fire("PLAYER_ENTERING_WORLD")
-check(not bar().shown, "bar hidden with no totems while locked")
+check(not bar().anyShown, "bar hidden with no totems while locked")
 
 -- place Strength of Earth in slot 2 at (100,100)
 totems[2] = { name = "Strength of Earth Totem IV", start = t, dur = 300, icon = 99 }
 fire("PLAYER_TOTEM_UPDATE", 2)
 check(btn(2).shown and not btn(1).shown, "slot 2 button shown, slot 1 not")
-check(bar().shown, "bar shown")
+check(bar().anyShown, "bar shown")
 tick(); check(btn(2).mark.tex:find("Ready") and not btn(2).mark.tex:find("NotReady"), "in range at the totem")
 check(btn(2).icon.color[1] == 1, "icon untinted in range")
 
@@ -342,7 +345,7 @@ check(not btn(2).dist.shown, "no distance shown when only the buff is known")
 TotemRangeDB.distanceMode = "off"
 
 SlashCmdList.TOTEMRANGE("unlock")
-check(TotemRangeDB.locked == false and bar().shown, "/totemrange unlock shows the frame")
+check(TotemRangeDB.locked == false and bar().anyShown, "/totemrange unlock shows the frame")
 -- the exact bug from the field: left unlocked, real totems must still be tracked (not replaced by samples)
 fire("PLAYER_ENTERING_WORLD"); pos = { y = 5, x = 5, map = 1 }; fire("PLAYER_TOTEM_UPDATE", 2)
 pos = { y = 5, x = 80, map = 1 }; TotemRangeDB.distanceMode = "yards"; tick()
@@ -354,13 +357,13 @@ local keep = totems
 totems = {}
 for slot = 1, 4 do fire("PLAYER_TOTEM_UPDATE", slot) end
 check(not btn(1).shown and not btn(2).shown and not btn(3).shown and not btn(4).shown, "Totemic Recall (unlocked): no icons at all, no placeholders")
-check(not bar().shown, "...and nothing else on screen: no drag box, bar hidden")
+check(not bar().anyShown, "...and nothing else on screen: no drag box, bar hidden")
 SlashCmdList.TOTEMRANGE("lock")
-check(not bar().shown, "locked and no totems: nothing on screen")
+check(not bar().anyShown, "locked and no totems: nothing on screen")
 SlashCmdList.TOTEMRANGE("unlock")
 totems = keep
 pos = { y = 5, x = 5, map = 1 }; fire("PLAYER_TOTEM_UPDATE", 2)
-check(btn(2).shown and bar().shown, "new totem: the real icon shows")
+check(btn(2).shown and bar().anyShown, "new totem: the real icon shows")
 SlashCmdList.TOTEMRANGE("lock")
 SlashCmdList.TOTEMRANGE("")
 check(savedCat.opened == 7, "/totemrange opens the settings")
@@ -371,11 +374,11 @@ do
 	local function rescan() ev.scripts.OnUpdate(ev, 0.6) end
 	totems = {}; secretMode = false; inCombat = false
 	for slot = 1, 4 do fire("PLAYER_TOTEM_UPDATE", slot) end
-	check(not bar().shown, "rescan setup: empty bar is hidden (so its own tick is not running)")
+	check(not bar().anyShown, "rescan setup: empty bar is hidden (so its own tick is not running)")
 	totems = { [3] = { name = "Windfury Totem", start = t, dur = 300, icon = 8 } }   -- placed, NO event fired
 	pos = { y = 0, x = 0, map = 1 }
 	rescan()
-	check(btn(3).shown and bar().shown, "missed event: the rescan shows the totem anyway")
+	check(btn(3).shown and bar().anyShown, "missed event: the rescan shows the totem anyway")
 	local logged = false
 	for _, line in ipairs(TotemRangeDB.log or {}) do if line:find("RESCAN found slot 3") then logged = true end end
 	check(logged, "...and logs that it caught a missed event")
@@ -384,7 +387,7 @@ do
 	totems = {}
 	for slot = 1, 4 do fire("PLAYER_TOTEM_UPDATE", slot) end
 	rescan()
-	check(not btn(3).shown and not bar().shown, "totem gone: the rescan does not bring it back")
+	check(not btn(3).shown and not bar().anyShown, "totem gone: the rescan does not bring it back")
 	-- and while the preview is on it leaves the samples alone
 	totems = { [1] = { name = "Searing Totem III", start = t, dur = 60, icon = 7 } }
 	rescan(); for slot = 1, 4 do fire("PLAYER_TOTEM_UPDATE", slot) end
@@ -516,7 +519,7 @@ do
 
 	-- nothing out at all: nothing drawn
 	out()
-	check(not bar().shown and not holders[2].shown and not holders[4].shown, "no totems out at all: no placeholders either")
+	check(not bar().anyShown and not holders[2].shown and not holders[4].shown, "no totems out at all: no placeholders either")
 
 	-- a reserved totem that appears mid-fight lands exactly in its place (and nothing protected is touched)
 	put(1, "Searing Totem III")
@@ -543,7 +546,7 @@ do
 	TotemRangeDB.reserve = { [1] = true, [2] = true, [3] = true, [4] = true }; ns.apply()
 	check(holders[1].shown and holders[2].shown and holders[3].shown and holders[4].shown, "preview with everything reserved: four empty places")
 	ns.optionsOpen = false; ns.updatePreview()
-	check(not holders[1].shown and not holders[2].shown and not bar().shown, "settings closed, nothing out: no placeholders")
+	check(not holders[1].shown and not holders[2].shown and not bar().anyShown, "settings closed, nothing out: no placeholders")
 
 	-- the four boxes in the settings
 	local boxes = {}
@@ -567,6 +570,38 @@ do
 		check(type(r) == "table" and r[2] == nil and r[3] == nil, "damaged reserve (" .. label .. ") is cleaned")
 	end
 	TotemRangeDB.reserve = {}; TotemRangeDB.distanceMode = "off"; ns.apply(); out()
+end
+
+-- ---- removing totems one by one (right-click), the last one included, in and out of a fight
+do
+	local function out() totems = {}; for slot = 1, 4 do fire("PLAYER_TOTEM_UPDATE", slot) end end
+	secretMode = false; secretPos = false; pos = { y = 0, x = 0, map = 1 }
+	for _, fight in ipairs({ false, true }) do
+		inCombat = false; out()
+		for slot = 1, 4 do totems[slot] = { name = "Windfury Totem", start = t, dur = 300, icon = 8 }; fire("PLAYER_TOTEM_UPDATE", slot) end
+		inCombat = fight
+		local before = #printedErrors
+		for _, slot in ipairs({ 2, 1, 3, 4 }) do
+			totems[slot] = nil; fire("PLAYER_TOTEM_UPDATE", slot); tick()
+		end
+		runTimers()
+		check(not btn(1).shown and not btn(2).shown and not btn(3).shown and not btn(4).shown,
+			(fight and "in a fight: " or "out of a fight: ") .. "every totem removed one by one, all icons gone")
+		check(#printedErrors == before, (fight and "in a fight: " or "out of a fight: ") .. "removing the last one raises nothing / touches nothing restricted")
+		inCombat = false; fire("PLAYER_REGEN_ENABLED")
+	end
+	out()
+end
+
+-- ---- if the game ever does block something, it is written to the log with where it came from
+do
+	local function lastLog() local l = TotemRangeDB.log; return l[#l] end
+	fire("ADDON_ACTION_BLOCKED", "SomeOtherAddon", "Frame:Hide()")
+	check(not (lastLog() or ""):find("ACTION_BLOCKED"), "a block caused by another addon is not logged as ours")
+	local before = #printedErrors
+	fire("ADDON_ACTION_BLOCKED", "TotemRange", "TotemRangeBar:Hide()")
+	check((lastLog() or ""):find("ADDON_ACTION_BLOCKED: TotemRangeBar:Hide()", 1, true), "our blocked action is logged with the function name")
+	check(#printedErrors == before, "...and logging it raises nothing")
 end
 
 -- ---- order: earth, fire, water, air like the default totem bar; reorderable; damaged data falls back
@@ -680,7 +715,13 @@ do
 	-- the last totem expiring stops the work: the bar hides (its tick only runs while it is shown)
 	totems = {}
 	tick()
-	check(not bar().shown, "cost: when the last totem expires the bar hides, so the tick stops")
+	check(not bar().anyShown, "cost: when the last totem expires the bar is empty")
+	local reads = 0
+	local origUP = UnitPosition
+	UnitPosition = function(...) reads = reads + 1; return origUP(...) end
+	for _ = 1, 20 do tick() end
+	UnitPosition = origUP
+	check(reads == 0, "cost: with no totem out a tick reads nothing at all")
 end
 
 check(#printedErrors == 0, "the addon never printed an error line during the whole run" .. (printedErrors[1] and (": " .. printedErrors[1]) or ""))
