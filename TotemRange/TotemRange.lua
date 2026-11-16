@@ -18,6 +18,7 @@ ns.defaults = {
 	vertical = false,
 	showTimer = true,
 	showRange = true,
+	rememberLast = true,    -- a placeholder shows the last totem that was out in that place (a chosen totem always wins)
 	distanceMode = "bar",   -- how far you are from each totem: "bar" (room left in its radius), "yards" (exact number) or "off"
 	tint = true,
 	locked = true,
@@ -66,6 +67,113 @@ local function fixReserve()
 	return r
 end
 ns.fixReserve = fixReserve
+
+-- The totems of each element (slot), for the placeholder-icon picker, and for working out which totem an
+-- icon belongs to when the game hides it in combat. Entry: display name, then spell ids to try (the first one
+-- this client knows is used; Forever has its own Fire Nova, for one).
+local CATALOGUE = {
+	[2] = { { "Stoneclaw Totem", 5730 }, { "Stoneskin Totem", 8071 }, { "Earthbind Totem", 2484 },
+		{ "Strength of Earth Totem", 8075 }, { "Tremor Totem", 8143 }, { "Earth Elemental Totem", 2062 } },
+	[1] = { { "Searing Totem", 3599 }, { "Fire Nova", 408341, 1535 }, { "Magma Totem", 8190 },
+		{ "Flametongue Totem", 8227 }, { "Frost Resistance Totem", 8181 }, { "Fire Elemental Totem", 2894 } },
+	[3] = { { "Healing Stream Totem", 5394 }, { "Mana Spring Totem", 5675 }, { "Fire Resistance Totem", 8184 },
+		{ "Disease Cleansing Totem", 8170 }, { "Poison Cleansing Totem", 8166 }, { "Mana Tide Totem", 16190 } },
+	[4] = { { "Grounding Totem", 8177 }, { "Nature Resistance Totem", 10595 }, { "Windfury Totem", 8512 },
+		{ "Sentry Totem", 6495 }, { "Windwall Totem", 15107 }, { "Grace of Air Totem", 8835 }, { "Tranquil Air Totem", 25908 } },
+}
+local GENERIC_ICON_SPELL = { [1] = 3599, [2] = 8071, [3] = 5394, [4] = 8835 }   -- one totem per element, when nothing is known
+local QUESTION = "Interface\\Icons\\INV_Misc_QuestionMark"
+
+local texCache = {}
+local function spellTexture(id)
+	local t = texCache[id]
+	if not t then
+		t = C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(id)
+		if t then texCache[id] = t end   -- only successes are kept: a miss is retried
+	end
+	return t
+end
+
+local function spellInfo(id)
+	if not (C_Spell and C_Spell.GetSpellInfo) then return nil end
+	local ok, info = pcall(C_Spell.GetSpellInfo, id)
+	return ok and info or nil
+end
+
+-- the id of a catalogue entry this client has, or nil
+local function entryId(entry)
+	for i = 2, #entry do if spellInfo(entry[i]) then return entry[i] end end
+	if not (C_Spell and C_Spell.GetSpellInfo) then return entry[2] end   -- can't ask: trust the list
+end
+
+-- The totems of one element that exist in this game, in a fixed order: { { id =, name =, tex = }, ... }
+function ns.totemChoices(slot)
+	local out = {}
+	for _, entry in ipairs(CATALOGUE[slot] or {}) do
+		local id = entryId(entry)
+		local tex = id and spellTexture(id)
+		if id and tex then
+			local info = spellInfo(id)
+			out[#out + 1] = { id = id, name = (info and type(info.name) == "string" and info.name ~= "") and info.name or entry[1], tex = tex }
+		end
+	end
+	return out
+end
+
+-- icon of the totem called `name` (any rank), or nil
+local function iconForName(name)
+	if type(name) ~= "string" or isSecret(name) then return nil end
+	local lower = name:lower()
+	for _, list in pairs(CATALOGUE) do
+		for _, entry in ipairs(list) do
+			local key = entry[1]:lower():gsub(" totem$", "")
+			if lower:find(key, 1, true) then
+				local id = entryId(entry)
+				return id and spellTexture(id) or nil
+			end
+		end
+	end
+end
+
+-- db.hold.last[slot] = icon of the last totem seen in that place; db.hold.choice[slot] = spell id of the totem the
+-- player locked that place's placeholder to. Always plain tables with plain values.
+local function fixHold()
+	local h = db.hold
+	if type(h) ~= "table" then h = {}; db.hold = h end
+	if type(h.last) ~= "table" then h.last = {} end
+	if type(h.choice) ~= "table" then h.choice = {} end
+	for slot = 1, MAX_SLOTS do
+		local l, c = h.last[slot], h.choice[slot]
+		if l ~= nil and not ((type(l) == "number" or type(l) == "string") and not isSecret(l)) then h.last[slot] = nil end
+		if c ~= nil and type(c) ~= "number" then h.choice[slot] = nil end
+	end
+	return h
+end
+ns.fixHold = fixHold
+
+-- What the dim placeholder shows: the locked totem, else (if remembering is on) the last totem that was out in
+-- that place, else a generic totem of the element.
+local function holderTexture(slot, h)
+	h = h or fixHold()
+	local id = h.choice[slot]
+	local tex = id and spellTexture(id)
+	if tex then return tex end
+	if db.rememberLast ~= false and h.last[slot] then return h.last[slot] end
+	return spellTexture(GENERIC_ICON_SPELL[slot]) or QUESTION
+end
+ns.holderTexture = holderTexture
+
+-- Remember what a place last held. Done for every totem, even with remembering off, so turning it on later
+-- already knows. The icon is used when readable; in combat it may be hidden, and the name stands in.
+local function remember(slot, icon, name)
+	local tex
+	if icon ~= nil and not isSecret(icon) and (type(icon) == "number" or type(icon) == "string") then tex = icon
+	else tex = iconForName(name) end
+	if tex then
+		local last = fixHold().last
+		if last[slot] ~= tex then last[slot] = tex end
+	end
+end
 
 -- Radius in yards, matched on the English totem name (others fall back to 30, the Forever buff radius).
 -- aura = the buff name to look for when positions are unavailable.
@@ -289,14 +397,12 @@ end
 -- The placeholder for a reserved place with no totem in it: the element's totem icon, dimmed and grey, in the
 -- same frame the action buttons use. A plain frame of its own (a button's children hide with the button).
 local holds = {}
-local HOLD_SPELL = { [1] = 3599, [2] = 8071, [3] = 5394, [4] = 8835 }   -- one totem per element, for the picture
 local function newHolder(slot)
 	local h = CreateFrame("Frame", nil, bar)
 	h.icon = h:CreateTexture(nil, "BACKGROUND")
 	h.icon:SetAllPoints()
 	h.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
-	local tex = C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(HOLD_SPELL[slot])
-	h.icon:SetTexture(tex or "Interface\\Icons\\INV_Misc_QuestionMark")
+	h.icon:SetTexture(QUESTION)   -- the real picture is set when it is shown (refreshHolders)
 	h.icon:SetDesaturated(true)
 	h.icon:SetAlpha(0.35)
 	h.border = h:CreateTexture(nil, "OVERLAY")
@@ -557,6 +663,7 @@ local function refreshSlot(slot, placed)
 		s.range, s.aura = classify(name)
 	end
 	s.range = s.range or DEFAULT_RANGE
+	remember(slot, icon, s.name)
 	s.start = readable(start) and start or nil   -- a new start time means the totem was dropped again
 	b.sampleName = s.name
 	pcall(b.icon.SetTexture, b.icon, icon)
@@ -569,11 +676,18 @@ end
 -- Placeholders: only for reserved places that are empty, and only while the bar is up (a totem is out, or the
 -- settings are open): with nothing out at all there is nothing to compare against, so nothing is drawn.
 function ns.refreshHolders()
-	local reserve = fixReserve()
+	local reserve, hold = fixReserve(), fixHold()
 	local up = bar and (bar.anyShown or previewing)
 	for slot = 1, MAX_SLOTS do
 		local ph = holds[slot]
-		if ph then ph:SetShown(up and reserve[slot] and not buttons[slot]:IsShown() and true or false) end
+		if ph then
+			local show = up and reserve[slot] and not buttons[slot]:IsShown() and true or false
+			ph:SetShown(show)
+			if show then
+				local tex = holderTexture(slot, hold)
+				if ph.tex ~= tex then ph.tex = tex; ph.icon:SetTexture(tex) end
+			end
+		end
 	end
 end
 
@@ -832,6 +946,7 @@ local function onTotemCast(id)
 				st.name = cast
 				st.range, st.aura = classify(cast)
 				st.last = nil
+				remember(slot, nil, cast)
 				dbg("named slot %d from cast: %s", slot, cast)
 			end
 		end
@@ -873,6 +988,7 @@ ev:SetScript("OnEvent", guard("event", function(self, event, arg1, ...)
 		for k, v in pairs(ns.defaults) do if db[k] == nil then db[k] = v end end
 		fixOrder()
 		fixReserve()
+		fixHold()
 		self:UnregisterEvent("ADDON_LOADED")
 		if InCombatLockdown() then
 			-- secure buttons can't be made in combat: build when it ends

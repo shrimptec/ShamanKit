@@ -22,6 +22,7 @@ local function checkbox(parent, label, key, x, y, get, set)
 		PlaySound(on and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
 		ns.updatePreview()
 	end)
+	cb.settingKey = key
 	cb.refresh = function() cb:SetChecked(get and get() or (not get and ns.get()[key])) end
 	return cb
 end
@@ -100,7 +101,7 @@ function ns.buildOptions()
 		checkbox(panel, "Show time left", "showTimer", 16, -210),
 		checkbox(panel, "Show range mark (check / cross)", "showRange", 16, -240),
 		checkbox(panel, "Tint the icon red when out of range", "tint", 16, -270),
-		checkbox(panel, "Replace the default totem timers (stays under the player frame)", "attach", 16, -300),
+		checkbox(panel, "Replace the default totem timers", "attach", 16, -300),
 		slider(panel, "Position left / right", "attachX", -200, 300, 40, -335),
 		slider(panel, "Position up / down", "attachY", -100, 100, 40, -390),
 		checkbox(panel, "Unlock frame (drag it to move)", "locked", 16, -445),
@@ -113,58 +114,114 @@ function ns.buildOptions()
 		ns.updatePreview()
 	end)
 
-	-- Order of the totems in the bar: one row per place, with the element, an icon and Up / Down buttons.
-	local orderTitle = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-	orderTitle:SetPoint("TOPLEFT", 330, -70)
-	orderTitle:SetText("Totem order")
-	local orderHint = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-	orderHint:SetPoint("TOPLEFT", orderTitle, "BOTTOMLEFT", 0, -4)
-	orderHint:SetText("First to last in the bar. Default: earth, fire, water, air.")
-	local SAMPLE_SPELL = { [1] = 3599, [2] = 8071, [3] = 5394, [4] = 8835 }   -- one totem of each element, for the icon
+	-- One table for the bar: a row per place (first to last) with that element's icon, Up / Down arrows, whether to
+	-- keep its space open when the totem is down, and which totem its dim placeholder shows.
+	local COL = { icon = 310, label = 344, up = 404, down = 426, keep = 458, pick = 492 }
+	local tableTitle = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+	tableTitle:SetPoint("TOPLEFT", COL.icon, -70)
+	tableTitle:SetText("Totems, first to last in the bar")
+	local keepHead = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+	keepHead:SetPoint("TOPLEFT", COL.keep - 2, -96)
+	keepHead:SetText("Keep")
+	local pickHead = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+	pickHead:SetPoint("TOPLEFT", COL.pick, -96)
+	pickHead:SetText("Placeholder icon")
+
 	local rows = {}
-	local function refreshOrder()
-		local order = ns.fixOrder()
+	local function rowSlot(i) return ns.fixOrder()[i] end
+	local function choiceIndex(list, id)
+		for k, c in ipairs(list) do if c.id == id then return k end end
+		return 0   -- 0 = Auto
+	end
+	local function cycle(slot, dir)
+		local list, choice = ns.totemChoices(slot), ns.fixHold().choice
+		local k = choiceIndex(list, choice[slot]) + dir
+		if k > #list then k = 0 elseif k < 0 then k = #list end
+		choice[slot] = k > 0 and list[k].id or nil
+	end
+	local function refreshRows()
 		for i, row in ipairs(rows) do
-			local slot = order[i]
-			local tex = C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(SAMPLE_SPELL[slot])
-			row.icon:SetTexture(tex or "Interface\\Icons\\INV_Misc_QuestionMark")
+			local slot = rowSlot(i)
+			row.icon:SetTexture(ns.holderTexture(slot))
 			row.label:SetText(i .. ".  " .. (ns.SLOT_NAMES[slot] or ("Slot " .. slot)))
 			row.up:SetEnabled(i > 1)
 			row.down:SetEnabled(i < #rows)
+			row.keep.refresh()
+			local list = ns.totemChoices(slot)
+			local k = choiceIndex(list, ns.fixHold().choice[slot])
+			row.pick:SetText(k > 0 and (list[k].name:gsub(" Totem$", "")) or "Auto")
 		end
+	end
+	local function arrow(parent, x, y, dir)
+		local b = CreateFrame("Button", nil, parent)
+		b:SetSize(20, 20)
+		b:SetPoint("TOPLEFT", x, y)
+		local name = dir < 0 and "ScrollUpButton" or "ScrollDownButton"
+		b:SetNormalTexture("Interface\\Buttons\\UI-ScrollBar-" .. name .. "-Up")
+		b:SetPushedTexture("Interface\\Buttons\\UI-ScrollBar-" .. name .. "-Down")
+		b:SetDisabledTexture("Interface\\Buttons\\UI-ScrollBar-" .. name .. "-Disabled")
+		b:SetHighlightTexture("Interface\\Buttons\\UI-ScrollBar-" .. name .. "-Highlight", "ADD")
+		return b
 	end
 	for i = 1, #ns.fixOrder() do
 		local row = {}
-		local y = -112 - (i - 1) * 32
+		local y = -116 - (i - 1) * 34
 		row.icon = panel:CreateTexture(nil, "ARTWORK")
 		row.icon:SetSize(26, 26)
-		row.icon:SetPoint("TOPLEFT", 330, y)
+		row.icon:SetPoint("TOPLEFT", COL.icon, y)
 		row.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
 		row.label = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-		row.label:SetPoint("LEFT", row.icon, "RIGHT", 8, 0)
-		row.label:SetWidth(70)
+		row.label:SetPoint("TOPLEFT", COL.label, y - 6)
+		row.label:SetWidth(58)
 		row.label:SetJustifyH("LEFT")
-		row.up = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-		row.up:SetSize(52, 22)
-		row.up:SetPoint("LEFT", row.label, "RIGHT", 6, 0)
-		row.up:SetText("Up")
-		row.up:SetScript("OnClick", function() ns.moveSlot(i, -1); refreshOrder() end)
-		row.down = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-		row.down:SetSize(52, 22)
-		row.down:SetPoint("LEFT", row.up, "RIGHT", 4, 0)
-		row.down:SetText("Down")
-		row.down:SetScript("OnClick", function() ns.moveSlot(i, 1); refreshOrder() end)
+		row.up = arrow(panel, COL.up, y - 3, -1)
+		row.up.orderRow, row.up.orderDelta = i, -1
+		row.up:SetScript("OnClick", function() ns.moveSlot(i, -1); refreshRows() end)
+		row.down = arrow(panel, COL.down, y - 3, 1)
+		row.down.orderRow, row.down.orderDelta = i, 1
+		row.down:SetScript("OnClick", function() ns.moveSlot(i, 1); refreshRows() end)
+		row.keep = checkbox(panel, "", nil, COL.keep, y,
+			function() return ns.fixReserve()[rowSlot(i)] == true end,
+			function(on) ns.fixReserve()[rowSlot(i)] = on or nil end)
+		row.keep.rowIndex = i
+		row.pick = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+		row.pick:SetSize(112, 22)
+		row.pick:SetPoint("TOPLEFT", COL.pick, y - 2)
+		row.pick:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+		row.pick.rowIndex = i
+		row.pick:SetScript("OnClick", function(_, button)
+			cycle(rowSlot(i), button == "RightButton" and -1 or 1)
+			ns.updatePreview()
+			refreshRows()
+		end)
+		row.pick:SetScript("OnEnter", function(self)
+			local slot = rowSlot(i)
+			GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+			GameTooltip:SetText("Placeholder icon: " .. (ns.SLOT_NAMES[slot] or "?"))
+			GameTooltip:AddLine("Auto: " .. (ns.get().rememberLast ~= false and "the last totem you had out here" or "a generic totem of this element"), 1, 1, 1)
+			GameTooltip:AddLine("Pick a totem to lock the icon to it.", 1, 1, 1)
+			GameTooltip:AddLine("Click: next    Right-click: previous", 0.7, 0.7, 0.7)
+			GameTooltip:Show()
+		end)
+		row.pick:SetScript("OnLeave", GameTooltip_Hide)
 		rows[i] = row
 	end
 	local resetOrder = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-	resetOrder:SetSize(140, 24)
-	resetOrder:SetPoint("TOPLEFT", 330, -112 - #rows * 32 - 6)
+	resetOrder:SetSize(120, 22)
+	resetOrder:SetPoint("TOPLEFT", COL.icon, -256)
 	resetOrder:SetText("Reset order")
-	resetOrder:SetScript("OnClick", function() ns.resetOrder(); refreshOrder() end)
+	resetOrder:SetScript("OnClick", function() ns.resetOrder(); refreshRows() end)
+
+	-- Remembering: the placeholder shows the last totem that was out in that place (a picked totem always wins).
+	local remember = checkbox(panel, "Placeholder shows the last totem used", "rememberLast", COL.icon, -290)
+	controls[#controls + 1] = remember
+	local rememberHint = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+	rememberHint:SetPoint("TOPLEFT", COL.icon + 28, -318)
+	rememberHint:SetText("A totem picked in the list above always wins.")
 
 	-- How the distance to each totem is shown under it.
 	local distTitle = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-	distTitle:SetPoint("TOPLEFT", 330, -112 - #rows * 32 - 50)
+	distTitle:SetPoint("TOPLEFT", COL.icon, -350)
 	distTitle:SetText("Distance under each totem")
 	local MODES = {
 		{ "bar", "Range bar  (room left in its range)" },
@@ -177,31 +234,13 @@ function ns.buildOptions()
 		for _, r in ipairs(radios) do r.rb:SetChecked(r.mode == now) end
 	end
 	for i, m in ipairs(MODES) do
-		local rb = radio(panel, m[2], 330, -112 - #rows * 32 - 74 - (i - 1) * 24, function()
+		local rb = radio(panel, m[2], COL.icon, -374 - (i - 1) * 24, function()
 			ns.get().distanceMode = m[1]
 			refreshDistance()
 			ns.updatePreview()
 		end)
 		rb.mode = m[1]
 		radios[i] = { rb = rb, mode = m[1] }
-	end
-
-	-- Keep a place open for an element even when its totem is down: the dim placeholder makes the missing one obvious.
-	local holdTitle = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-	holdTitle:SetPoint("TOPLEFT", 330, -402)
-	holdTitle:SetText("Keep a space open for")
-	local holdHint = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-	holdHint:SetPoint("TOPLEFT", holdTitle, "BOTTOMLEFT", 0, -4)
-	holdHint:SetText("A dim icon marks the missing totem.")
-	local holdBoxes = {}
-	local HOLD_AT = { { 2, 330, -440 }, { 1, 440, -440 }, { 3, 330, -468 }, { 4, 440, -468 } }   -- earth, fire / water, air
-	for _, e in ipairs(HOLD_AT) do
-		local slot = e[1]
-		local cb = checkbox(panel, ns.SLOT_NAMES[slot], nil, e[2], e[3],
-			function() return ns.fixReserve()[slot] == true end,
-			function(on) ns.fixReserve()[slot] = on or nil end)
-		cb.slotKey = slot
-		holdBoxes[#holdBoxes + 1] = cb
 	end
 
 	local reset = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
@@ -224,9 +263,8 @@ function ns.buildOptions()
 	local function refresh()
 		for _, c in ipairs(controls) do c.refresh() end
 		dependents()
-		refreshOrder()
+		refreshRows()
 		refreshDistance()
-		for _, cb in ipairs(holdBoxes) do cb.refresh() end
 	end
 	panel:SetScript("OnShow", function()
 		refresh()
@@ -246,6 +284,7 @@ function ns.buildOptions()
 		end
 		db.order = ns.defaultOrder()
 		db.reserve = {}
+		ns.fixHold(); db.hold.choice = {}
 		refresh()
 		ns.updatePreview()
 	end

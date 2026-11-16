@@ -77,7 +77,15 @@ SOUNDKIT = {}; PlaySound = function() end
 function unpack_(...) return ... end
 unpack = unpack or table.unpack
 MAX_TOTEMS = 4
-C_Spell = { GetSpellTexture = function() return 1234 end, GetSpellInfo = function(id)
+-- spells this pretend client "has": the catalogue ids except 2062, 8170, 8166, 6495, 25908 and 1535 (so the picker's
+-- filtering is exercised); Forever's own Fire Nova is 408341
+KNOWN_SPELLS = { [5730] = "Stoneclaw Totem", [8071] = "Stoneskin Totem", [2484] = "Earthbind Totem", [8075] = "Strength of Earth Totem",
+	[8143] = "Tremor Totem", [3599] = "Searing Totem", [408341] = "Fire Nova", [8190] = "Magma Totem", [8227] = "Flametongue Totem",
+	[8181] = "Frost Resistance Totem", [5394] = "Healing Stream Totem", [5675] = "Mana Spring Totem", [8184] = "Fire Resistance Totem",
+	[16190] = "Mana Tide Totem", [8177] = "Grounding Totem", [10595] = "Nature Resistance Totem", [8512] = "Windfury Totem",
+	[15107] = "Windwall Totem", [8835] = "Grace of Air Totem" }
+C_Spell = { GetSpellTexture = function(id) return 100000 + (tonumber(id) or 0) end, GetSpellInfo = function(id)
+	if KNOWN_SPELLS[id] then return { name = KNOWN_SPELLS[id] } end
 	if id == 99 then return { name = "Totemic Projection" } end
 	if id == 555 then return { name = "Strength of Earth Totem" } end
 	if id == 556 then return { name = "Call of the Elements" } end
@@ -550,7 +558,7 @@ do
 
 	-- the four boxes in the settings
 	local boxes = {}
-	for _, f in ipairs(frames) do if f.slotKey and f.scripts.OnClick then boxes[f.slotKey] = f end end
+	for _, f in ipairs(frames) do if f.rowIndex and f.kind == "CheckButton" and f.scripts.OnClick then boxes[ns.fixOrder()[f.rowIndex]] = f end end
 	check(boxes[1] and boxes[2] and boxes[3] and boxes[4], "settings: a box for each element")
 	TotemRangeDB.reserve = {}
 	boxes[3].checked = true; boxes[3].scripts.OnClick(boxes[3])
@@ -604,6 +612,118 @@ do
 	check(#printedErrors == before, "...and logging it raises nothing")
 end
 
+-- ---- what the dim placeholder shows: a locked totem, else the last totem that was out there, else a generic one
+do
+	local holders = {}
+	for _, f in ipairs(frames) do if f.kind == "Frame" and f.icon and f.border and not f.name then holders[#holders + 1] = f end end
+	local TEX = function(id) return 100000 + id end
+	local function out() totems = {}; for slot = 1, 4 do fire("PLAYER_TOTEM_UPDATE", slot) end end
+	local function put(slot, name, icon) totems[slot] = { name = name, start = t, dur = 300, icon = icon }; fire("PLAYER_TOTEM_UPDATE", slot) end
+	TotemRangeDB.order = { 2, 1, 3, 4 }; TotemRangeDB.vertical = false; TotemRangeDB.distanceMode = "off"
+	TotemRangeDB.hold = nil; TotemRangeDB.rememberLast = true; TotemRangeDB.reserve = { [2] = true, [3] = true }
+	secretMode = false; secretPos = false; inCombat = false; pos = { y = 0, x = 0, map = 1 }
+	fire("PLAYER_ENTERING_WORLD"); out(); ns.fixHold()
+	put(1, "Searing Totem III", 777)   -- keeps the bar up while the others come and go
+	check(holders[2].tex == TEX(8071) and holders[3].tex == TEX(5394), "nothing remembered yet: the generic totem of the element (Stoneskin for earth, Healing Stream for water)")
+
+	-- remembers the last totem seen in that place
+	put(2, "Strength of Earth Totem II", 888); totems[2] = nil; fire("PLAYER_TOTEM_UPDATE", 2)
+	check(TotemRangeDB.hold.last[2] == 888 and holders[2].shown and holders[2].tex == 888, "an earth totem came and went: the placeholder is its icon")
+	put(2, "Stoneskin Totem", 999); totems[2] = nil; fire("PLAYER_TOTEM_UPDATE", 2)
+	check(holders[2].tex == 999, "a different earth totem next time: the placeholder follows the newest one")
+	check(holders[3].tex == TEX(5394), "...water, never seen, stays generic")
+
+	-- remembering switched off
+	TotemRangeDB.rememberLast = false; ns.updatePreview()
+	check(holders[2].tex == TEX(8071), "remembering off: back to the generic icon")
+	check(TotemRangeDB.hold.last[2] == 999, "...but it kept remembering underneath")
+	TotemRangeDB.rememberLast = true; ns.updatePreview()
+	check(holders[2].tex == 999, "remembering on again: straight back to what it knew")
+
+	-- a locked choice beats the memory and survives new totems
+	TotemRangeDB.hold.choice[2] = 8075; ns.updatePreview()
+	check(holders[2].tex == TEX(8075), "locked to Strength of Earth: that icon, not the remembered one")
+	put(2, "Stoneskin Totem", 555); totems[2] = nil; fire("PLAYER_TOTEM_UPDATE", 2)
+	check(holders[2].tex == TEX(8075) and TotemRangeDB.hold.last[2] == 555, "...it stays locked while new totems are still remembered underneath")
+	TotemRangeDB.rememberLast = false; ns.updatePreview()
+	check(holders[2].tex == TEX(8075), "...and locking works with remembering off")
+	TotemRangeDB.hold.choice[2] = nil; TotemRangeDB.rememberLast = true; ns.updatePreview()
+	check(holders[2].tex == 555, "unlocked: the memory shows again")
+	TotemRangeDB.hold.choice[2] = 123456789   -- a totem this client does not know: texture lookup still answers in the mock, so use a real miss
+	local realTex = C_Spell.GetSpellTexture
+	C_Spell.GetSpellTexture = function(id) if id == 123456789 then return nil end return realTex(id) end
+	ns.updatePreview()
+	check(holders[2].tex == 555, "a locked totem with no icon in this client falls back to the memory instead of showing nothing")
+	C_Spell.GetSpellTexture = realTex; TotemRangeDB.hold.choice[2] = nil
+
+	-- in a fight the game hides the icon: the name taken from the cast stands in
+	out(); put(1, "Searing Totem III", 777)
+	secretMode = true; inCombat = true
+	fire("UNIT_SPELLCAST_SUCCEEDED", "player", "g", 5675)   -- Mana Spring Totem cast
+	totems[3] = { name = "Mana Spring Totem", start = t, dur = 300, icon = 4242 }
+	fire("PLAYER_TOTEM_UPDATE", 3); runTimers()
+	secretMode = false; inCombat = false
+	check(TotemRangeDB.hold.last[3] == TEX(5675), "icon hidden in combat: remembered by the name of the totem that was cast")
+	totems[3] = nil; fire("PLAYER_TOTEM_UPDATE", 3)
+	check(holders[3].tex == TEX(5675), "...and the placeholder shows it")
+
+	-- damaged saved data
+	for label, bad in pairs({ ["a string"] = "x", ["junk inside"] = { last = { [2] = {} , [3] = true }, choice = { [1] = "a", [2] = {} } }, ["a number"] = 5 }) do
+		TotemRangeDB.hold = bad
+		local h = ns.fixHold()
+		check(type(h.last) == "table" and type(h.choice) == "table" and h.last[2] == nil and h.last[3] == nil and h.choice[1] == nil and h.choice[2] == nil,
+			"damaged icon memory (" .. label .. ") is cleaned")
+	end
+
+	-- the catalogue only lists totems this client has
+	local ids = {}
+	for _, c in ipairs(ns.totemChoices(2)) do ids[#ids + 1] = c.id end
+	check(table.concat(ids, ",") == "5730,8071,2484,8075,8143", "earth choices: only the totems the game has (Earth Elemental, 2062, is missing in this pretend client)")
+	ids = {}
+	for _, c in ipairs(ns.totemChoices(1)) do ids[#ids + 1] = c.id end
+	check(ids[2] == 408341, "Forever's own Fire Nova (408341) is picked when vanilla's (1535) is absent")
+	ids = {}
+	for _, c in ipairs(ns.totemChoices(4)) do ids[#ids + 1] = c.id end
+	check(table.concat(ids, ",") == "8177,10595,8512,15107,8835", "air choices: filtered the same way")
+
+	-- the picker buttons in the settings
+	TotemRangeDB.hold = nil; ns.fixHold(); TotemRangeDB.reserve = {}; TotemRangeDB.order = { 2, 1, 3, 4 }; savedCat.panel.OnRefresh()
+	local pick, keep = {}, {}
+	for _, f in ipairs(frames) do
+		if f.rowIndex and f.kind == "Button" and f.scripts.OnClick then pick[f.rowIndex] = f end
+		if f.rowIndex and f.kind == "CheckButton" then keep[f.rowIndex] = f end
+	end
+	check(pick[1] and pick[4] and pick[1].text == "Auto", "settings: a picker per row, starting on Auto")
+	pick[1].scripts.OnClick(pick[1], "LeftButton")
+	check(TotemRangeDB.hold.choice[2] == 5730 and pick[1].text == "Stoneclaw", "left-click: the first earth totem, shown without the word Totem")
+	pick[1].scripts.OnClick(pick[1], "LeftButton"); pick[1].scripts.OnClick(pick[1], "LeftButton")
+	check(TotemRangeDB.hold.choice[2] == 2484, "left-click again twice: third earth totem")
+	pick[1].scripts.OnClick(pick[1], "RightButton")
+	check(TotemRangeDB.hold.choice[2] == 8071, "right-click goes back one")
+	for _ = 1, 4 do pick[1].scripts.OnClick(pick[1], "LeftButton") end
+	check(TotemRangeDB.hold.choice[2] == nil and pick[1].text == "Auto", "past the last totem it wraps round to Auto")
+	pick[1].scripts.OnClick(pick[1], "RightButton")
+	check(TotemRangeDB.hold.choice[2] == 8143, "right-click from Auto goes to the last totem")
+	-- a row follows the element it shows, so reordering moves the pickers with it
+	TotemRangeDB.hold.choice = {}; ns.moveSlot(1, 1); savedCat.panel.OnRefresh()
+	pick[1].scripts.OnClick(pick[1], "LeftButton")
+	check(TotemRangeDB.hold.choice[1] == 3599 and not TotemRangeDB.hold.choice[2], "after moving fire to the top, the first row picks fire totems")
+	ns.resetOrder()
+	-- the keep-a-space box on a row, and the remember box
+	savedCat.panel.OnRefresh()
+	keep[2].checked = true; keep[2].scripts.OnClick(keep[2])
+	check(TotemRangeDB.reserve[1] == true and not TotemRangeDB.reserve[2], "the Keep box on the second row (fire) reserves fire")
+	local remBox
+	for _, f in ipairs(frames) do if f.settingKey == "rememberLast" then remBox = f end end
+	remBox.checked = false; remBox.scripts.OnClick(remBox)
+	check(TotemRangeDB.rememberLast == false, "the 'last totem used' box switches remembering off")
+	remBox.checked = true; remBox.scripts.OnClick(remBox)
+	check(TotemRangeDB.rememberLast == true, "...and on")
+	TotemRangeDB.hold.choice[2] = 5730; savedCat.panel.OnDefault()
+	check(next(TotemRangeDB.hold.choice) == nil and next(TotemRangeDB.reserve) == nil and TotemRangeDB.rememberLast == true, "Defaults clears locked totems and reserved spaces, remembering back on")
+	TotemRangeDB.reserve = {}; TotemRangeDB.hold = nil; ns.fixHold(); out()
+end
+
 -- ---- order: earth, fire, water, air like the default totem bar; reorderable; damaged data falls back
 do
 	local function xOf(slot) return btn(slot).anchor and btn(slot).anchor[4] end
@@ -641,7 +761,7 @@ do
 	check(ns.moveSlot(4, -1) == true and table.concat(TotemRangeDB.order, ",") == "1,2,4,3" and sequence() == "1,2,4", "move air up: fire, earth, air, water")
 	-- the real Up / Down buttons in the settings panel
 	local down
-	for _, f in ipairs(frames) do if f.text == "Down" and f.scripts.OnClick then down = f break end end
+	for _, f in ipairs(frames) do if f.orderRow == 1 and f.orderDelta == 1 and f.scripts.OnClick then down = f break end end
 	check(down ~= nil, "settings panel has Up / Down buttons")
 	TotemRangeDB.order = { 2, 1, 3, 4 }
 	down.scripts.OnClick(down)    -- the first Down button: earth <-> fire
