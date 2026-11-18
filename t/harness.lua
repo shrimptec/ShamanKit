@@ -14,6 +14,7 @@ print = function(...)
 	realPrint(...)
 end
 local scripts = {}
+REGISTERED = {}
 CALLS = setmetatable({}, { __index = function() return 0 end })
 local function mock(kind)
 	local o = { kind = kind, shown = true, scripts = {}, checked = false, value = 0, attrs = {} }
@@ -24,6 +25,7 @@ local function mock(kind)
 			return function() error("ADDON_ACTION_BLOCKED: " .. k .. " on a protected frame in combat") end
 		end
 		if k == "SetAttribute" then return function(self, n, v) self.attrs[n] = v end end
+		if k == "RegisterEvent" or k == "RegisterUnitEvent" then return function(self, n) REGISTERED[#REGISTERED + 1] = n end end
 		if k == "Show" then return function(self) self.shown = true end end
 		if k == "Hide" then return function(self) self.shown = false end end
 		if k == "SetShown" then return function(self, v) self.shown = v and true or false end end
@@ -170,6 +172,24 @@ check(btn(2).mark.tex:find("Ready") and not btn(2).mark.tex:find("NotReady"), "2
 pos = { y = 100, x = 140, map = 1 }; tick()
 check(btn(2).mark.tex:find("NotReady"), "40 yd away is out of range")
 check(btn(2).icon.color[1] == 0.8, "icon tinted red out of range")
+
+-- the check and the cross are separate options (out of range right now)
+TotemRangeDB.showOut = false; tick()
+check(not btn(2).mark.shown, "cross off: nothing drawn out of range")
+check(btn(2).icon.color[1] == 0.8, "cross off: red tint still there")
+pos = { y = 100, x = 125, map = 1 }; tick()
+check(btn(2).mark.shown and btn(2).mark.tex:find("Ready") and not btn(2).mark.tex:find("NotReady"), "cross off: check still drawn in range")
+TotemRangeDB.showRange = false; tick()
+check(not btn(2).mark.shown, "check off: nothing drawn in range")
+pos = { y = 100, x = 140, map = 1 }; tick()
+check(not btn(2).mark.shown, "both off: nothing drawn out of range")
+TotemRangeDB.showOut = true; tick()
+check(btn(2).mark.shown and btn(2).mark.tex:find("NotReady"), "check off, cross on: cross drawn out of range")
+pos = { y = 100, x = 125, map = 1 }; tick()
+check(not btn(2).mark.shown, "check off, cross on: nothing drawn in range")
+TotemRangeDB.showRange = true; tick()
+pos = { y = 100, x = 140, map = 1 }; tick()
+check(btn(2).mark.shown and btn(2).mark.tex:find("NotReady"), "both back on: cross drawn again")
 
 -- Earthbind (10 yd) in slot 1 at current spot; two buttons laid out side by side
 totems[1] = { name = "Earthbind Totem", start = t, dur = 45, icon = 5 }
@@ -836,7 +856,7 @@ do
 		[3] = { name = "Mana Spring Totem", start = t, dur = 300, icon = 9 }, [4] = { name = "Windfury Totem", start = t, dur = 300, icon = 10 } }
 	secretMode = false; secretPos = false; inCombat = false; mapOn = true
 	pos = { y = 0, x = 0, map = 1 }
-	TotemRangeDB.distanceMode = "bar"; TotemRangeDB.showRange = true
+	TotemRangeDB.distanceMode = "bar"; TotemRangeDB.showRange = true; TotemRangeDB.showOut = true
 	fire("PLAYER_ENTERING_WORLD"); for slot = 1, 4 do fire("PLAYER_TOTEM_UPDATE", slot) end
 	for _ = 1, 20 do tick() end
 	local counts = { UnitPosition = 0, GetTotemInfo = 0, GetPlayerMapPosition = 0 }
@@ -883,6 +903,230 @@ do
 	for _ = 1, 20 do tick() end
 	UnitPosition = origUP
 	check(reads == 0, "cost: with no totem out a tick reads nothing at all")
+end
+
+-- ---- weapon enchant + Lightning Shield icons
+do
+	local db = TotemRangeDB
+	local function W() return _G.TotemRangeWeapon end
+	local function S() return _G.TotemRangeShield end
+	local aux = _G.TotemRangeIndicators
+	local function second() ev.scripts.OnUpdate(ev, 1.0) end      -- the once-a-second look
+	TotemRangeDB.log = {}                                         -- earlier sections log deliberate errors; start clean
+
+	totems = {}; inCombat = false; secretMode = false; secretPos = false; mapOn = true
+	auras = {}
+	local held, itemClass, itemSub, dead = 555, 2, 8, false
+	local enchants, enchantSecret, enchantCalls = {}, false, 0
+	GetInventoryItemID = function(_, slot) if slot == 16 then return held end end
+	UnitIsDeadOrGhost = function() return dead end
+	C_Item = {
+		GetItemInfoInstant = function(id) return id, "Weapon", "Two-Handed Maces", "INVTYPE_2HWEAPON", 1, itemClass, itemSub end,
+		GetWeaponEnchantInfo = function() enchantCalls = enchantCalls + 1; if enchantSecret then return secret() end return enchants end,
+	}
+	db.weaponOn, db.shieldOn, db.auxAttached, db.vertical, db.lastImbue = true, true, true, false, nil
+	db.size, db.spacing = 36, 4
+	ns.optionsOpen = false
+	fire("PLAYER_ENTERING_WORLD")
+	second()
+
+	-- the events are real names this client knows (they were taken from the installed addons)
+	local want = { UNIT_AURA = true, UNIT_INVENTORY_CHANGED = true, PLAYER_EQUIPMENT_CHANGED = true }
+	local known = { ADDON_LOADED = true, PLAYER_ENTERING_WORLD = true, PLAYER_TOTEM_UPDATE = true, UNIT_SPELLCAST_SUCCEEDED = true,
+		PLAYER_REGEN_DISABLED = true, PLAYER_REGEN_ENABLED = true, ADDON_ACTION_BLOCKED = true, ADDON_ACTION_FORBIDDEN = true,
+		UNIT_AURA = true, UNIT_INVENTORY_CHANGED = true, PLAYER_EQUIPMENT_CHANGED = true }
+	local seen, unknown = {}, nil
+	for _, n in ipairs(REGISTERED) do seen[n] = true; if not known[n] then unknown = n end end
+	check(seen.UNIT_AURA and seen.UNIT_INVENTORY_CHANGED and seen.PLAYER_EQUIPMENT_CHANGED, "icons: the three events are registered")
+	check(unknown == nil, "icons: every registered event is one this client has" .. (unknown and (" (" .. unknown .. ")") or ""))
+
+	-- weapon: nothing on it -> the icon pops up
+	enchants = {}
+	second()
+	check(W().shown and W().glow.shown, "weapon: no enchant -> icon shown with the ring")
+	check(W().time.text == "", "weapon: no countdown while it is simply missing")
+	-- an enchant with plenty of time -> hidden, and its picture is remembered
+	enchants = { { hasEnchant = true, timeLeft = 1800000, enchantType = 3, enchantID = 5, enchantIconID = 135 } }
+	second()
+	check(not W().shown, "weapon: enchant with 30 min left -> icon hidden")
+	check(db.lastImbue == 135, "weapon: the picture of the enchant on the weapon is remembered")
+	-- running out
+	enchants[1].timeLeft = 90000; second()
+	check(W().shown and W().time.text == "2m", "weapon: 90 s left -> icon with 2m (" .. tostring(W().time.text) .. ")")
+	enchants[1].timeLeft = 45000; second()
+	check(W().shown and W().time.text == "45s", "weapon: 45 s left -> 45s")
+	enchants[1].timeLeft = 119000; second()
+	check(W().shown, "weapon: just under 2 minutes counts as running out")
+	enchants[1].timeLeft = 121000; second()
+	check(not W().shown, "weapon: just over 2 minutes is fine")
+	-- gone: shows the picture of what was on it
+	enchants = {}; second()
+	check(W().shown and W().icon.tex == 135, "weapon: after it ran out the icon shows the enchant you used (135)")
+	-- an enchant with no time (permanent) is not a reminder
+	enchants = { { hasEnchant = true, enchantType = 1 } }; second()
+	check(not W().shown, "weapon: an enchant without a timer counts as enchanted")
+	-- one enchant ended, another remains: the longer one counts
+	enchants = { { hasEnchant = true, timeLeft = 30000 }, { hasEnchant = true, timeLeft = 900000 } }; second()
+	check(not W().shown, "weapon: two enchants, the longer one has plenty left")
+	enchants = {}
+
+	-- things that must not nag
+	itemSub = 20; second()
+	check(not W().shown, "weapon: a fishing pole in hand -> no reminder")
+	itemSub = 8; itemClass = 4; second()
+	check(not W().shown, "weapon: not a weapon (armour class) -> no reminder")
+	itemClass = 2; held = nil; second()
+	check(not W().shown, "weapon: nothing in the main hand -> no reminder")
+	held = 555; dead = true; second()
+	check(not W().shown, "weapon: dead -> no reminder")
+	dead = false; second()
+	check(W().shown, "weapon: alive again with no enchant -> back")
+
+	-- readings the game will not give: the icon stays as it was, no claim either way
+	enchantSecret = true; second()
+	check(W().shown, "weapon: a hidden reading keeps the icon where it was (missing)")
+	enchants = { { hasEnchant = true, timeLeft = 1800000 } }; enchantSecret = false; second()
+	check(not W().shown, "weapon: enchanted again")
+	enchantSecret = true; second()
+	check(not W().shown, "weapon: a hidden reading does not suddenly claim 'missing'")
+	enchantSecret = false
+	enchants = { { hasEnchant = secret(), timeLeft = 5000 } }; second()
+	check(not W().shown, "weapon: a hidden 'has enchant' flag changes nothing")
+	local savedInfo = C_Item.GetWeaponEnchantInfo
+	C_Item.GetWeaponEnchantInfo = nil; second()
+	check(not W().shown, "weapon: an API this client lacks changes nothing")
+	C_Item.GetWeaponEnchantInfo = savedInfo
+	enchants = {}
+
+	-- the weapon icon needs no totem and no bar frame work: nothing of the bar is touched
+	check(not bar().anyShown, "icons: they work with no totem out")
+
+	-- Lightning Shield
+	check(not S().shown, "shield: not up -> no icon")
+	auras["Lightning Shield"] = { applications = 3, icon = 1 }
+	fire("UNIT_AURA", "player")
+	check(S().shown and S().count.text == "3", "shield: up with 3 charges -> icon, number 3")
+	auras["Lightning Shield"].applications = 2; fire("UNIT_AURA", "player")
+	check(S().count.text == "2", "shield: charge used -> 2")
+	auras["Lightning Shield"] = { applications = 0, charges = 1 }; fire("UNIT_AURA", "player")
+	check(S().shown and S().count.text == "1", "shield: falls back to 'charges' when 'applications' is empty")
+	auras["Lightning Shield"] = { applications = nil }; fire("UNIT_AURA", "player")
+	check(S().shown and S().count.text == "", "shield: up with no number -> icon, no number")
+	auras["Lightning Shield"] = { applications = secret() }; fire("UNIT_AURA", "player")
+	check(S().shown, "shield: a hidden charge number still shows the icon")
+	auras["Lightning Shield"] = { applications = 3 }; fire("UNIT_AURA", "player")
+	secretPos = true; fire("UNIT_AURA", "player")
+	check(S().shown and S().count.text == "3", "shield: an unreadable aura list keeps the icon as it was")
+	secretPos = false
+	auras["Lightning Shield"] = nil; fire("UNIT_AURA", "player")
+	check(not S().shown, "shield: gone -> icon hidden")
+	secretPos = true; fire("UNIT_AURA", "player")
+	check(not S().shown, "shield: an unreadable aura list does not invent a shield")
+	secretPos = false
+
+	-- the switches
+	db.weaponOn = false; ns.updatePreview()
+	check(not W().shown, "weapon icon off in the settings -> hidden even though the enchant is missing")
+	enchantCalls = 0; for _ = 1, 5 do second() end
+	check(enchantCalls == 0, "weapon icon off -> the enchant is never even read")
+	db.weaponOn = true; ns.updatePreview()
+	check(W().shown, "weapon icon switched on -> shows at once")
+	db.shieldOn = false; auras["Lightning Shield"] = { applications = 3 }; fire("UNIT_AURA", "player"); ns.updatePreview()
+	check(not S().shown, "shield icon off in the settings -> hidden while the shield is up")
+	db.shieldOn = true; ns.updatePreview()
+	check(S().shown and S().count.text == "3", "shield icon switched on -> shows at once")
+	auras["Lightning Shield"] = nil; fire("UNIT_AURA", "player")
+
+	-- samples only while the settings are open and only where the real thing is not showing
+	enchants = { { hasEnchant = true, timeLeft = 1800000 } }; second()
+	ns.optionsOpen = true; ns.updatePreview()
+	check(W().shown and S().shown and S().count.text == "3", "settings open: samples of both icons")
+	ns.optionsOpen = false; ns.updatePreview()
+	check(not W().shown and not S().shown, "settings closed: samples gone")
+	enchants = {}; auras["Lightning Shield"] = { applications = 2 }; fire("UNIT_AURA", "player"); second()
+	ns.optionsOpen = true; ns.updatePreview()
+	check(S().count.text == "2", "settings open: the real charges win over the sample")
+	ns.optionsOpen = false; ns.updatePreview()
+
+	-- cost: nothing drawn while nothing changes
+	for k in pairs(CALLS) do CALLS[k] = 0 end
+	for _ = 1, 50 do second() end
+	for _ = 1, 50 do fire("UNIT_AURA", "player") end
+	check(CALLS.SetText == 0 and CALLS.SetTexture == 0 and CALLS.SetVertexColor == 0, "cost: a second with nothing new writes nothing to the screen")
+	local before = collectgarbage("count"); collectgarbage("stop")
+	local b0 = collectgarbage("count")
+	for _ = 1, 100 do second() end
+	local kb = (collectgarbage("count") - b0) / 100
+	collectgarbage("restart")
+	check(kb < 3, ("cost: under 3 KB of garbage per second for both icons (%.2f)"):format(kb))
+
+	-- where they sit
+	enchants = {}; second()
+	db.shieldOn, db.weaponOn = true, true; ns.updatePreview()
+	check(S().anchor[4] == 0 and W().anchor[4] == (db.size * 0.75 + 0.5 - (db.size * 0.75 + 0.5) % 1) + db.spacing,
+		"place: shield first, weapon next to it (" .. tostring(S().anchor[4]) .. ", " .. tostring(W().anchor[4]) .. ")")
+	db.shieldOn = false; ns.updatePreview()
+	check(W().anchor[4] == 0, "place: with the shield icon off the weapon icon takes the first place")
+	db.shieldOn = true; ns.updatePreview()
+	check(aux.anchor[1] == "TOPLEFT" and aux.anchor[2] == bar() and aux.anchor[3] == "BOTTOMLEFT", "place: attached -> under the totem bar")
+	db.vertical = true; ns.apply()
+	check(aux.anchor[1] == "TOPRIGHT" and aux.anchor[2] == bar() and aux.anchor[3] == "TOPLEFT", "place: vertical bar -> to the left of it")
+	check(W().anchor[5] ~= 0 or S().anchor[5] ~= 0, "place: vertical bar -> the two icons stack")
+	db.vertical = false; ns.apply()
+	db.auxAttached = false; ns.updatePreview()
+	check(aux.anchor[2] == UIParent, "place: not attached -> its own place on the screen")
+	local moved = false
+	rawset(aux, "StartMoving", function() moved = true end)
+	db.locked = true; W().scripts.OnDragStart(W())
+	check(not moved, "drag: locked -> no moving")
+	db.locked = false; W().scripts.OnDragStart(W())
+	check(moved, "drag: unlocked and not attached -> moves")
+	W().scripts.OnDragStop(W())
+	check(db.auxX == 10 and db.auxY == 20 and db.auxPoint == "CENTER", "drag: the new place is saved")
+	moved = false; db.auxAttached = true; ns.updatePreview(); W().scripts.OnDragStart(W())
+	check(not moved, "drag: attached -> the icons never move on their own")
+	db.locked = true
+	db.auxAttached = false; ns.resetPosition()
+	check(db.auxX == 0 and db.auxY == -260, "reset position also puts the icons back")
+	db.auxAttached = true; ns.updatePreview()
+
+	-- combat: only shown / hidden; placement and size wait for the fight to end
+	enchants = { { hasEnchant = true, timeLeft = 1800000 } }; auras["Lightning Shield"] = nil
+	second(); fire("UNIT_AURA", "player")
+	inCombat = true; fire("PLAYER_REGEN_DISABLED")
+	local sizeBefore = S().w
+	enchants = {}; second()
+	check(W().shown, "combat: the enchant ran out in a fight -> the icon appears")
+	auras["Lightning Shield"] = { applications = 3 }; fire("UNIT_AURA", "player")
+	check(S().shown and S().count.text == "3", "combat: shield cast in a fight -> the icon appears")
+	auras["Lightning Shield"].applications = 1; fire("UNIT_AURA", "player")
+	check(S().count.text == "1", "combat: the charge count follows")
+	db.size = 50; db.vertical = true; ns.apply(); ns.updatePreview()
+	check(S().w == sizeBefore and aux.anchor[1] == "TOPLEFT", "combat: a size / layout change waits (no resize, no re-anchor)")
+	db.locked = false; db.auxAttached = false; ns.updatePreview()
+	check(aux.anchor[2] == bar(), "combat: un-attaching waits too")
+	db.locked = true
+	inCombat = false; fire("PLAYER_REGEN_ENABLED")
+	check(S().w == 38 and aux.anchor[1] == "CENTER" and aux.anchor[2] == UIParent, ("combat over: the waiting changes are applied (size 38, own place) w=%s a1=%s"):format(tostring(S().w), tostring(aux.anchor[1])))
+	db.size = 36; db.vertical = false; db.auxAttached = true; ns.updatePreview()
+	-- the whole fight touched no protected frame
+	local blocked
+	for _, l in ipairs(TotemRangeDB.log or {}) do if l:find("ACTION_BLOCKED") or l:find("ERROR") then blocked = l end end
+	check(blocked == nil, "icons: no error and no blocked action in the log" .. (blocked and (" -> " .. blocked) or ""))
+	enchants = { { hasEnchant = true, timeLeft = 1800000 } }; auras["Lightning Shield"] = nil
+	second(); fire("UNIT_AURA", "player")
+	check(not W().shown and not S().shown, "icons: back to nothing when both are fine")
+
+	-- /totemrange status prints both readings
+	local lines = {}
+	local oldPrint = print
+	print = function(...) lines[#lines + 1] = table.concat({ ... }, " ") end
+	SlashCmdList.TOTEMRANGE("status")
+	print = oldPrint
+	local sawW, sawS
+	for _, l in ipairs(lines) do if l:find("weapon: ok") then sawW = true end if l:find("Lightning Shield: false") then sawS = true end end
+	check(sawW and sawS, "status: lists the weapon and the shield readings")
+	noErrors("icons: no error line in the log after all of that")
 end
 
 check(#printedErrors == 0, "the addon never printed an error line during the whole run" .. (printedErrors[1] and (": " .. printedErrors[1]) or ""))

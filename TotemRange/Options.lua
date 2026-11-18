@@ -99,12 +99,13 @@ function ns.buildOptions()
 		slider(panel, "Spacing", "spacing", 0, 24, 16, -125),
 		checkbox(panel, "Vertical layout", "vertical", 16, -180),
 		checkbox(panel, "Show time left", "showTimer", 16, -210),
-		checkbox(panel, "Show range mark (check / cross)", "showRange", 16, -240),
-		checkbox(panel, "Tint the icon red when out of range", "tint", 16, -270),
-		checkbox(panel, "Replace the default totem timers", "attach", 16, -300),
-		slider(panel, "Position left / right", "attachX", -200, 300, 40, -335),
-		slider(panel, "Position up / down", "attachY", -100, 100, 40, -390),
-		checkbox(panel, "Unlock frame (drag it to move)", "locked", 16, -445),
+		checkbox(panel, "Green check when in range", "showRange", 16, -240),
+		checkbox(panel, "Red cross when out of range", "showOut", 16, -270),
+		checkbox(panel, "Tint the icon red when out of range", "tint", 16, -300),
+		checkbox(panel, "Replace the default totem timers", "attach", 16, -330),
+		slider(panel, "Position left / right", "attachX", -200, 300, 40, -365),
+		slider(panel, "Position up / down", "attachY", -100, 100, 40, -420),
+		checkbox(panel, "Unlock frame (drag it to move)", "locked", 16, -475),
 	}
 	-- "locked" is stored the other way round to how the box reads
 	local unlock = controls[#controls]
@@ -243,9 +244,18 @@ function ns.buildOptions()
 		radios[i] = { rb = rb, mode = m[1] }
 	end
 
+	-- The two small icons: weapon enchant missing / running out, and Lightning Shield charges.
+	local auxTitle = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+	auxTitle:SetPoint("TOPLEFT", COL.icon, -452)
+	auxTitle:SetText("Small icons next to the bar")
+	controls[#controls + 1] = checkbox(panel, "Weapon enchant missing / running out", "weaponOn", COL.icon, -474)
+	controls[#controls + 1] = checkbox(panel, "Lightning Shield charges", "shieldOn", COL.icon, -500)
+	local auxAttach = checkbox(panel, "Keep them with the totem bar", "auxAttached", COL.icon, -526)
+	controls[#controls + 1] = auxAttach
+
 	local reset = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
 	reset:SetSize(140, 24)
-	reset:SetPoint("TOPLEFT", 16, -490)
+	reset:SetPoint("TOPLEFT", 16, -520)
 	reset:SetText("Reset position")
 	reset:SetScript("OnClick", ns.resetPosition)
 
@@ -256,10 +266,13 @@ function ns.buildOptions()
 		c:SetAlpha(on and 1 or 0.5)
 	end
 	local function dependents()
-		local on = ns.get().attach and true or false
-		enable(offX, on); enable(offY, on); enable(unlock, not on)
+		local d = ns.get()
+		local on = d.attach and true or false
+		enable(offX, on); enable(offY, on)
+		enable(unlock, not on or d.auxAttached == false)   -- the two small icons can be dragged on their own even while the bar is attached
 	end
 	attach:HookScript("OnClick", dependents)
+	auxAttach:HookScript("OnClick", dependents)
 	local function refresh()
 		for _, c in ipairs(controls) do c.refresh() end
 		dependents()
@@ -280,7 +293,7 @@ function ns.buildOptions()
 	panel.OnDefault = function()
 		local db = ns.get()
 		for k, v in pairs(ns.defaults) do
-			if k ~= "point" and k ~= "relPoint" and k ~= "x" and k ~= "y" then db[k] = v end
+			if k ~= "point" and k ~= "relPoint" and k ~= "x" and k ~= "y" and k ~= "auxPoint" and k ~= "auxRelPoint" and k ~= "auxX" and k ~= "auxY" then db[k] = v end
 		end
 		db.order = ns.defaultOrder()
 		db.reserve = {}

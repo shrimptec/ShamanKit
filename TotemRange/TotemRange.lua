@@ -17,7 +17,8 @@ ns.defaults = {
 	spacing = 4,
 	vertical = false,
 	showTimer = true,
-	showRange = true,
+	showRange = true,       -- green check when in range
+	showOut = true,         -- red cross when out of range
 	rememberLast = true,    -- a placeholder shows the last totem that was out in that place (a chosen totem always wins)
 	distanceMode = "bar",   -- how far you are from each totem: "bar" (room left in its radius), "yards" (exact number) or "off"
 	tint = true,
@@ -25,6 +26,10 @@ ns.defaults = {
 	attach = false,        -- replace the default totem timers and sit under the player frame
 	attachX = 65, attachY = 8,
 	point = "CENTER", relPoint = "CENTER", x = 0, y = -200,
+	weaponOn = true,        -- small icon when the weapon has no enchant (or one about to run out)
+	shieldOn = true,        -- small icon with the Lightning Shield charges while it is up
+	auxAttached = true,     -- the two icons sit with the totem bar; false = a place of their own (drag it when unlocked)
+	auxPoint = "CENTER", auxRelPoint = "CENTER", auxX = 0, auxY = -260,
 }
 
 local isSecret = issecretvalue or function() return false end
@@ -203,6 +208,7 @@ ns.classify = classify
 local bar, buttons, hits = nil, {}, {}
 local state = {}          -- slot -> { at = placement position, range, aura, name }
 local previewing = false
+local applyAux               -- the weapon / shield icons (defined further down); layout() asks it to re-place them
 
 -- ---------------------------------------------------------------- positions & auras
 
@@ -502,10 +508,13 @@ local function layout()
 	local long = math.max(n, 1) * s + math.max(n - 1, 0) * gap
 	if db.vertical then bar:SetSize(s, long) else bar:SetSize(long, s) end
 	ns.refreshHolders()
+	if applyAux then applyAux() end
 end
 
 local function setMark(b, r)
-	if not db.showRange then b.mark:Hide() return end
+	-- check (in range) and cross (out of range) are separate options; "?" shows if either is on
+	local want = r == nil and (db.showRange or db.showOut) or (r and db.showRange) or (r == false and db.showOut)
+	if not want then b.mark:Hide() return end
 	-- unknown gets its own yellow "?" so a blank is never mistaken for "in range"
 	b.mark:SetTexture(r == nil and "Interface\\RaidFrame\\ReadyCheck-Waiting"
 		or r and "Interface\\RaidFrame\\ReadyCheck-Ready" or "Interface\\RaidFrame\\ReadyCheck-NotReady")
@@ -568,7 +577,7 @@ end
 
 local function paintRange(b, r, dist, range)
 	local c = r == nil and 0 or (r and 1 or 2)
-	local showRange = db.showRange and true or false
+	local showRange = (db.showRange and 1 or 0) + (db.showOut and 2 or 0)
 	if b.pc ~= c or b.psr ~= showRange then
 		b.pc, b.psr = c, showRange
 		setMark(b, r)
@@ -849,6 +858,314 @@ if TotemFrame then
 	end) end
 end
 
+-- ---------------------------------------------------------------- weapon enchant + Lightning Shield icons
+
+-- Two small icons next to the totem bar. Like the totem icons they are plain frames (children of the bar, which
+-- is restricted in combat), so in combat they are only ever shown or hidden: where they sit and how big they are
+-- changes out of combat only (applyAux defers). A reading the game hides (secret) or can't give leaves the icon
+-- as it was; a missing enchant is only claimed when the game plainly said "none".
+local aux, ind = nil, {}
+local auxPending = false
+local WARN_SECS = 120                          -- an enchant with less than this left counts as running out
+local WEAPON_MAIN = (Enum and Enum.WeaponSlot and Enum.WeaponSlot.MainHand) or 0
+local WEAPON_CLASS = (Enum and Enum.ItemClass and Enum.ItemClass.Weapon) or 2
+local FISHING_POLE = 20                        -- weapon subclass: nobody wants an imbue reminder while fishing
+local IMBUE_SPELLS = { 8232, 8024, 8033, 8017 }  -- Windfury, Flametongue, Frostbrand, Rockbiter Weapon (rank 1): the first you know gives the icon
+local SHIELD_ID = 324                          -- Lightning Shield, rank 1 (the aura is looked up by name, so any rank)
+local SHIELD_FALLBACK_ICON = "Interface\\Icons\\Spell_Nature_LightningShield"
+
+local function knownSpell(id)
+	if IsPlayerSpell then
+		local ok, r = pcall(IsPlayerSpell, id)
+		if ok and not isSecret(r) and r then return true end
+	end
+	if C_SpellBook and C_SpellBook.IsSpellKnown then
+		local ok, r = pcall(C_SpellBook.IsSpellKnown, id)
+		if ok and not isSecret(r) and r then return true end
+	end
+	return false
+end
+
+-- the picture on the weapon icon: the last enchant seen on the weapon (what you actually use), else the best
+-- imbue you know, else Rockbiter
+local function weaponIcon()
+	local last = db.lastImbue
+	if last ~= nil and (type(last) == "number" or type(last) == "string") and not isSecret(last) then return last end
+	for _, id in ipairs(IMBUE_SPELLS) do
+		if knownSpell(id) then
+			local tex = spellTexture(id)
+			if tex then return tex end
+		end
+	end
+	return spellTexture(8017) or QUESTION
+end
+
+local shieldName
+local function shieldAuraName()
+	if shieldName then return shieldName end
+	local info = spellInfo(SHIELD_ID)
+	local n = info and info.name
+	if type(n) == "string" and not isSecret(n) and n ~= "" then shieldName = n; return n end
+	return "Lightning Shield"
+end
+
+-- "keep" (can't tell right now), "none" (nothing to remind about), "missing", "ok" or "expiring";
+-- then the seconds left (nil = no time known), the picture of the enchant on the weapon, and the raw list.
+local function readWeapon()
+	local okd, dead = pcall(UnitIsDeadOrGhost, "player")
+	if okd then
+		if isSecret(dead) then return "keep" end
+		if dead then return "none" end
+	end
+	local id = GetInventoryItemID and GetInventoryItemID("player", 16)
+	if isSecret(id) then return "keep" end
+	if not id then return "none" end                           -- nothing in the main hand
+	if not (C_Item and C_Item.GetItemInfoInstant and C_Item.GetWeaponEnchantInfo) then return "keep" end
+	local iok, _, _, _, _, _, class, sub = pcall(C_Item.GetItemInfoInstant, id)
+	if not iok or class == nil or isSecret(class) or isSecret(sub) then return "keep" end
+	if class ~= WEAPON_CLASS or sub == FISHING_POLE then return "none" end
+	local ok, list = pcall(C_Item.GetWeaponEnchantInfo, WEAPON_MAIN)
+	if not ok or isSecret(list) then return "keep" end
+	if list ~= nil and type(list) ~= "table" then return "keep" end
+	local active, left, icon, untimed = false, nil, nil, false
+	if list then
+		for _, e in ipairs(list) do
+			if type(e) == "table" and not isSecret(e) then
+				local h = e.hasEnchant
+				if isSecret(h) then return "keep" end
+				if h then
+					active = true
+					local ms = e.timeLeft
+					if readable(ms) and ms > 0 then
+						if not left or ms / 1000 > left then left = ms / 1000 end   -- the longest-lasting one is what is still protecting you
+					else
+						untimed = true
+					end
+					if readable(e.enchantIconID) then icon = e.enchantIconID end
+				end
+			end
+		end
+	end
+	if not active then return "missing", nil, nil, list end
+	if untimed or not left then return "ok", nil, icon, list end
+	if left <= WARN_SECS then return "expiring", left, icon, list end
+	return "ok", left, icon, list
+end
+
+-- Lightning Shield: false (not up), true + charges (the number may be hidden), or "keep"
+local function readShield()
+	if not (C_UnitAuras and C_UnitAuras.GetAuraDataBySpellName) then return "keep" end
+	local ok, data = pcall(C_UnitAuras.GetAuraDataBySpellName, "player", shieldAuraName(), "HELPFUL")
+	if not ok or isSecret(data) then return "keep" end
+	if data == nil then return false end
+	if type(data) ~= "table" then return "keep" end
+	local n = data.applications
+	if not isSecret(n) and not (type(n) == "number" and n > 0) then
+		local c = data.charges
+		if isSecret(c) or (type(c) == "number" and c > 0) then n = c else n = nil end
+	end
+	return true, n
+end
+
+local function timeText(secs)
+	if not secs then return "" end
+	if secs >= 60 then return ("%dm"):format(math.ceil(secs / 60)) end
+	return ("%ds"):format(math.max(0, math.floor(secs)))
+end
+
+local function auxSize() return math.max(20, math.floor(db.size * 0.75 + 0.5)) end
+
+local function indTooltip(self)
+	GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+	if self.kind == "shield" then
+		GameTooltip:SetText(shieldAuraName())
+		if self.tipLine then GameTooltip:AddLine(self.tipLine, 1, 1, 1) end
+	else
+		GameTooltip:SetText("Weapon enchant")
+		if self.tipLine then GameTooltip:AddLine(self.tipLine, 1, 1, 1) end
+	end
+	GameTooltip:Show()
+end
+
+local function newIndicator(kind)
+	local f = CreateFrame("Frame", "TotemRange" .. (kind == "shield" and "Shield" or "Weapon"), aux)
+	f.kind = kind
+	f.icon = f:CreateTexture(nil, "BACKGROUND")
+	f.icon:SetAllPoints()
+	f.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+
+	f.over = CreateFrame("Frame", nil, f)
+	f.over:SetAllPoints()
+	f.over:SetFrameLevel(f:GetFrameLevel() + 2)
+	f.border = f.over:CreateTexture(nil, "OVERLAY")                 -- the action-button bevel, like the totem icons
+	f.border:SetTexture("Interface\\Buttons\\UI-Quickslot2")
+	f.border:SetPoint("CENTER", 0, -1)
+
+	-- the action bar's own highlight ring: pulses red when the enchant is gone, steady yellow when it is running out
+	f.glow = f.over:CreateTexture(nil, "OVERLAY", nil, 2)
+	f.glow:SetTexture("Interface\\Buttons\\UI-ActionButton-Border")
+	f.glow:SetBlendMode("ADD")
+	f.glow:SetPoint("CENTER")
+	f.glow:Hide()
+	local ok, ag = pcall(function()
+		local g = f.glow:CreateAnimationGroup()
+		g:SetLooping("BOUNCE")
+		local a = g:CreateAnimation("Alpha")
+		a:SetFromAlpha(1); a:SetToAlpha(0.3); a:SetDuration(0.7)
+		return g
+	end)
+	if ok and ag then f.pulse = ag end
+
+	f.count = f.over:CreateFontString(nil, "OVERLAY", "NumberFontNormal")     -- charges, like a buff's stack count
+	f.count:SetPoint("BOTTOMRIGHT", -1, 2)
+	f.time = f.over:CreateFontString(nil, "OVERLAY", "NumberFontNormalSmall") -- time left, like a cooldown number
+	f.time:SetPoint("BOTTOM", 0, 2)
+
+	f:EnableMouse(true)
+	f:SetScript("OnEnter", guard("tooltip", indTooltip))
+	f:SetScript("OnLeave", GameTooltip_Hide)
+	f:RegisterForDrag("LeftButton")
+	f:SetScript("OnDragStart", function()
+		if db.locked == false and db.auxAttached == false and not InCombatLockdown() then aux:StartMoving() end
+	end)
+	f:SetScript("OnDragStop", function()
+		aux:StopMovingOrSizing()
+		local p, _, rp, x, y = aux:GetPoint()
+		db.auxPoint, db.auxRelPoint, db.auxX, db.auxY = p, rp, x, y
+	end)
+	f:Hide()
+	return f
+end
+
+-- Where the icons sit: under the totem bar (beside it when the bar is vertical), or in a place of their own.
+-- The shield takes the first place so the usual picture (shield up, enchant fine) has no gap. Out of combat only.
+applyAux = function()
+	if not aux then return end
+	if InCombatLockdown() then auxPending = true return end
+	auxPending = false
+	local s, gap = auxSize(), db.spacing
+	local place = 0
+	for _, kind in ipairs({ "shield", "weapon" }) do
+		local f = ind[kind]
+		local on = (kind == "shield" and db.shieldOn) or (kind == "weapon" and db.weaponOn)
+		f:SetSize(s, s)
+		f.border:SetSize(s * 66 / 36, s * 66 / 36)
+		f.glow:SetSize(s * 62 / 36, s * 62 / 36)
+		f:ClearAllPoints()
+		if on then
+			local off = place * (s + gap)
+			if db.vertical then f:SetPoint("TOPLEFT", aux, "TOPLEFT", 0, -off) else f:SetPoint("TOPLEFT", aux, "TOPLEFT", off, 0) end
+			place = place + 1
+		else
+			f:SetPoint("TOPLEFT", aux, "TOPLEFT", 0, 0)
+		end
+	end
+	local long = math.max(place, 1) * s + math.max(place - 1, 0) * gap
+	if db.vertical then aux:SetSize(s, long) else aux:SetSize(long, s) end
+	aux:ClearAllPoints()
+	if db.auxAttached ~= false then
+		if db.vertical then
+			aux:SetPoint("TOPRIGHT", bar, "TOPLEFT", -6, 0)   -- the range bars of a vertical bar are on its right
+		else
+			local mode = distMode()
+			local below = mode == "bar" and (GAUGE_GAP + math.max(5, math.floor(db.size * 0.16 + 0.5)) + 6) or (mode == "yards" and 18 or 6)
+			aux:SetPoint("TOPLEFT", bar, "BOTTOMLEFT", 0, -below)
+		end
+	else
+		aux:SetPoint(db.auxPoint or "CENTER", UIParent, db.auxRelPoint or "CENTER", db.auxX or 0, db.auxY or -260)
+	end
+end
+
+local W = { st = "none" }       -- the last reading of the weapon
+local S = { up = false }        -- the last reading of the shield
+
+local function rawList(list)
+	if type(list) ~= "table" then return tostring(list) end
+	local out = {}
+	for i, e in ipairs(list) do
+		if type(e) == "table" and not isSecret(e) then
+			local function v(x) return (isSecret(x) and "?") or tostring(x) end
+			out[#out + 1] = ("{type=%s id=%s icon=%s ms=%s}"):format(v(e.enchantType), v(e.enchantID), v(e.enchantIconID), v(e.timeLeft))
+		end
+	end
+	return #out > 0 and table.concat(out, " ") or "(empty)"
+end
+
+local function paintWeapon()
+	local f = ind.weapon
+	if not f then return end
+	if db.weaponOn then
+		local st, left, icon, list = readWeapon()
+		if st ~= "keep" then
+			if st ~= W.st then dbg("WEAPON %s left=%s entries=%s", st, left and ("%.0f"):format(left) or "-", rawList(list)) end
+			W.st, W.left = st, left
+			if icon and icon ~= db.lastImbue then db.lastImbue = icon end
+		end
+	end
+	local real = db.weaponOn and (W.st == "missing" or W.st == "expiring")
+	local view = real and W.st or ((db.weaponOn and ns.optionsOpen) and "sample" or "off")   -- a sample only while the settings are open
+	local text = view == "expiring" and timeText(W.left) or ""
+	local key = view .. "|" .. text .. "|" .. tostring(db.lastImbue)
+	if f.vkey == key then return end
+	f.vkey = key
+	if view == "off" then
+		if f.pulse then f.pulse:Stop() end
+		f.glow:Hide()
+		f:Hide()
+		return
+	end
+	f.icon:SetTexture(weaponIcon())
+	f.count:SetText("")
+	f.time:SetText(text)
+	local missing = view ~= "expiring"          -- missing (or the sample): grey picture + red pulse
+	f.icon:SetDesaturated(missing)
+	if missing then f.glow:SetVertexColor(1, 0.2, 0.1) else f.glow:SetVertexColor(1, 0.82, 0) end
+	f.glow:Show()
+	if f.pulse then if missing then f.pulse:Play() else f.pulse:Stop(); f.glow:SetAlpha(1) end end
+	f.tipLine = missing and "Your weapon has no enchant." or ("Your weapon enchant ends in " .. text .. ".")
+	f:Show()
+end
+
+local function paintShield()
+	local f = ind.shield
+	if not f then return end
+	if db.shieldOn then
+		local r, n = readShield()
+		if r ~= "keep" then
+			if (r and true or false) ~= S.up then dbg("SHIELD %s charges=%s", r and "up" or "down", isSecret(n) and "?" or tostring(n)) end
+			S.up, S.n = r and true or false, n
+		end
+	end
+	local real = db.shieldOn and S.up
+	local view = real and "up" or ((db.shieldOn and ns.optionsOpen) and "sample" or "off")
+	local n = view == "sample" and 3 or S.n
+	local hidden = isSecret(n)                  -- a hidden number can't be compared, so it is passed straight on and never cached
+	local key = view .. "|" .. (hidden and "?" or tostring(n))
+	if not hidden and f.vkey == key then return end
+	f.vkey = (not hidden) and key or nil
+	if view == "off" then f:Hide() return end
+	f.icon:SetTexture(spellTexture(SHIELD_ID) or SHIELD_FALLBACK_ICON)
+	f.icon:SetDesaturated(false)
+	f.glow:Hide()
+	f.time:SetText("")
+	if hidden then pcall(f.count.SetText, f.count, n)
+	elseif type(n) == "number" and n > 0 then f.count:SetText(tostring(n))
+	else f.count:SetText("") end
+	f.tipLine = (not hidden and type(n) == "number" and n > 0) and (n == 1 and "1 charge left" or (n .. " charges left")) or nil
+	f:Show()
+end
+
+ns.updateAux = guard("indicators", function() paintWeapon(); paintShield() end)
+
+local function buildAux()
+	aux = CreateFrame("Frame", "TotemRangeIndicators", bar)
+	aux:SetSize(1, 1)
+	aux:SetClampedToScreen(true)
+	aux:SetMovable(true)
+	ind.shield = newIndicator("shield")
+	ind.weapon = newIndicator("weapon")
+end
+
 -- ---------------------------------------------------------------- public API for the options panel
 
 function ns.apply()
@@ -869,6 +1186,8 @@ end
 function ns.updatePreview()
 	applyAttach()
 	applyBarMouse()
+	applyAux()
+	ns.updateAux()
 	local want = ns.optionsOpen and not anyRealTotem()   -- samples: only a live preview while the panel is open
 	if want and not previewing then showPreview()
 	elseif not want and previewing then endPreview()
@@ -880,7 +1199,9 @@ function ns.resetPosition()
 	local d = ns.defaults
 	db.point, db.relPoint, db.x, db.y = d.point, d.relPoint, d.x, d.y
 	db.attachX, db.attachY = d.attachX, d.attachY
+	db.auxPoint, db.auxRelPoint, db.auxX, db.auxY = d.auxPoint, d.auxRelPoint, d.auxX, d.auxY
 	applyAttach()
+	applyAux()
 end
 
 function ns.get() return db end
@@ -922,6 +1243,7 @@ local function build()
 		holds[slot] = newHolder(slot)
 	end
 	applyAttach()
+	buildAux()
 	layout()
 
 	local acc = 0
@@ -980,13 +1302,24 @@ local function rescan()
 end
 local guardedRescan = guard("rescan", rescan)
 
+-- the icons that watch the weapon and the shield also listen for the game's own signals; every name is
+-- registered on its own inside pcall, because one name this client doesn't know would otherwise throw
+local function registerAuxEvents(self)
+	pcall(self.RegisterUnitEvent, self, "UNIT_AURA", "player")
+	pcall(self.RegisterUnitEvent, self, "UNIT_INVENTORY_CHANGED", "player")
+	pcall(self.RegisterEvent, self, "PLAYER_EQUIPMENT_CHANGED")
+end
+
 local reportedUnlocked, reportedBlocked = false, false
 local ev = CreateFrame("Frame")
 do
-	local acc = 0
+	local acc, acc2 = 0, 0
 	ev:SetScript("OnUpdate", function(_, elapsed)
 		acc = acc + elapsed
 		if acc >= 0.5 then acc = 0; guardedRescan() end
+		-- the weapon has no signal for "the enchant ran out", so it is looked at once a second (shield: only a safety net)
+		acc2 = acc2 + elapsed
+		if acc2 >= 1 then acc2 = 0; ns.updateAux() end
 	end)
 end
 ev:RegisterEvent("ADDON_LOADED")
@@ -994,6 +1327,7 @@ ev:SetScript("OnEvent", guard("event", function(self, event, arg1, ...)
 	if event == "ADDON_LOADED" and arg1 == ADDON then
 		TotemRangeDB = TotemRangeDB or {}
 		db = TotemRangeDB
+		if db.showRange == false and db.showOut == nil then db.showOut = false end   -- old single switch hid both marks
 		for k, v in pairs(ns.defaults) do if db[k] == nil then db[k] = v end end
 		fixOrder()
 		fixReserve()
@@ -1013,6 +1347,7 @@ ev:SetScript("OnEvent", guard("event", function(self, event, arg1, ...)
 		self:RegisterEvent("PLAYER_REGEN_ENABLED")
 		self:RegisterEvent("ADDON_ACTION_BLOCKED")
 		self:RegisterEvent("ADDON_ACTION_FORBIDDEN")
+		registerAuxEvents(self)
 		if ns.buildOptions then ns.buildOptions() end
 	elseif event == "PLAYER_ENTERING_WORLD" then
 		for slot in pairs(state) do state[slot] = nil end   -- loading screen: positions mean nothing now
@@ -1055,8 +1390,14 @@ ev:SetScript("OnEvent", guard("event", function(self, event, arg1, ...)
 		self:RegisterEvent("PLAYER_REGEN_DISABLED")
 		self:RegisterEvent("ADDON_ACTION_BLOCKED")
 		self:RegisterEvent("ADDON_ACTION_FORBIDDEN")
+		registerAuxEvents(self)
 		if ns.buildOptions then ns.buildOptions() end
 		refreshAll()
+		ns.updateAux()
+	elseif event == "UNIT_AURA" then
+		if db.shieldOn then paintShield() end        -- (its own cache: nothing is drawn unless the picture changes)
+	elseif event == "UNIT_INVENTORY_CHANGED" or event == "PLAYER_EQUIPMENT_CHANGED" then
+		if db.weaponOn then paintWeapon() end
 	elseif event == "PLAYER_REGEN_DISABLED" or event == "PLAYER_REGEN_ENABLED" then
 		-- what can still be read across the combat boundary (for the log)
 		local aura = hasAura("Strength of Earth")
@@ -1066,6 +1407,7 @@ ev:SetScript("OnEvent", guard("event", function(self, event, arg1, ...)
 		if event == "PLAYER_REGEN_ENABLED" then
 			if attachPending then applyAttach() end
 			if mousePending then applyBarMouse() end
+			if auxPending then applyAux() end
 			if previewing then layout() else refreshAll() end   -- catch what changed during the fight; make new totems clickable
 		end
 	elseif event == "PLAYER_TOTEM_UPDATE" then
@@ -1110,6 +1452,11 @@ SlashCmdList.TOTEMRANGE = function(msg)
 			end
 		end
 		if not any then print("|cff33ff99TotemRange|r: no active totems") end
+		local st, left, _, list = readWeapon()
+		print(("|cff33ff99TotemRange|r weapon: %s%s (%s)  enchants: %s"):format(st, left and (", %ds left"):format(math.floor(left)) or "", db.weaponOn and "icon on" or "icon off", rawList(list)))
+		local up, n = readShield()
+		print(("|cff33ff99TotemRange|r %s: %s%s (%s)"):format(shieldAuraName(), tostring(up),
+			(up == true and not isSecret(n)) and (", charges " .. tostring(n)) or "", db.shieldOn and "icon on" or "icon off"))
 	elseif ns.openOptions then
 		ns.openOptions()
 	end
