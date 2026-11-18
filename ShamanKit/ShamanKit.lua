@@ -444,6 +444,25 @@ end
 -- so they are made once out of combat and only repositioned out of combat. The visible icon sits at the
 -- same spot (it is a plain frame, so it can be shown/hidden in combat); a totem that appears mid-fight
 -- shows where its button was parked and becomes clickable when the fight ends.
+-- Moving the bar by hand (unlocked). The bar anchors the secure click buttons, so the game refuses to move it in
+-- combat (ADDON_ACTION_BLOCKED on StartMoving, seen in the log): a drag is only started out of combat, and only a drag
+-- that really started is finished and saved. A fight that begins mid-drag finishes it when the fight ends.
+local barMoving = false
+local function startBarMove()
+	if db.locked == false and not db.attach and not InCombatLockdown() then
+		bar:StartMoving()
+		barMoving = true
+	end
+end
+local function stopBarMove()
+	if not barMoving then return end
+	if InCombatLockdown() then return end   -- finished by PLAYER_REGEN_ENABLED
+	barMoving = false
+	bar:StopMovingOrSizing()
+	local p, _, rp, x, y = bar:GetPoint()
+	db.point, db.relPoint, db.x, db.y = p, rp, x, y
+end
+
 local function newHit(slot, b)
 	local h = CreateFrame("Button", "ShamanKitHit" .. slot, bar, "SecureActionButtonTemplate")
 	h.slot = slot
@@ -458,8 +477,8 @@ local function newHit(slot, b)
 	h:SetScript("OnEnter", tooltip)
 	h:SetScript("OnLeave", GameTooltip_Hide)
 	h:RegisterForDrag("LeftButton")
-	h:SetScript("OnDragStart", function() if db.locked == false and not db.attach then bar:StartMoving() end end)
-	h:SetScript("OnDragStop", function() bar:GetScript("OnDragStop")(bar) end)
+	h:SetScript("OnDragStart", startBarMove)
+	h:SetScript("OnDragStop", stopBarMove)
 	return h
 end
 
@@ -881,6 +900,7 @@ end
 -- as it was; a missing enchant is only claimed when the game plainly said "none".
 local aux, ind = nil, {}
 local auxPending = false
+local auxMoving = false
 local WARN_DEFAULT_MIN = 2                    -- minutes
 local WEAPON_MAIN = (Enum and Enum.WeaponSlot and Enum.WeaponSlot.MainHand) or 0
 local WEAPON_CLASS = (Enum and Enum.ItemClass and Enum.ItemClass.Weapon) or 2
@@ -1043,9 +1063,11 @@ local function newIndicator(kind)
 	f:SetScript("OnLeave", GameTooltip_Hide)
 	f:RegisterForDrag("LeftButton")
 	f:SetScript("OnDragStart", function()
-		if db.locked == false and auxMode() == "free" and not InCombatLockdown() then aux:StartMoving() end
+		if db.locked == false and auxMode() == "free" and not InCombatLockdown() then aux:StartMoving(); auxMoving = true end
 	end)
 	f:SetScript("OnDragStop", function()
+		if not auxMoving then return end   -- nothing was started (locked, or attached): nothing to save
+		auxMoving = false
 		aux:StopMovingOrSizing()
 		local p, _, rp, x, y = aux:GetPoint()
 		db.auxPoint, db.auxRelPoint, db.auxX, db.auxY = p, rp, x, y
@@ -1147,10 +1169,11 @@ applyAux = function()
 	end
 end
 
--- Samples of the two icons (so there is something to look at and to grab): while the settings are open, and while
--- the icons are unlocked in a place of their own. Only where the real thing is not showing.
+-- Samples of the two icons (so there is something to look at and to grab): ONLY while a settings page is open, and
+-- only where the real thing is not showing. Never otherwise: a sample looks exactly like the real icon, so one that
+-- stayed on screen read as "my enchant is missing" / "I have the shield" when neither was true.
 local function showSamples()
-	return ns.optionsOpen or (db.locked == false and auxMode() == "free")
+	return ns.optionsOpen
 end
 
 local W = { st = "none" }       -- the last reading of the weapon
@@ -1314,11 +1337,9 @@ local function build()
 	bar:SetClampedToScreen(true)
 	bar:SetMovable(true)
 	bar:RegisterForDrag("LeftButton")
-	bar:SetScript("OnDragStart", function(self) if db.locked == false and not db.attach then self:StartMoving() end end)
+	bar:SetScript("OnDragStart", startBarMove)
 	bar:SetScript("OnDragStop", function(self)
-		self:StopMovingOrSizing()
-		local p, _, rp, x, y = self:GetPoint()
-		db.point, db.relPoint, db.x, db.y = p, rp, x, y
+		stopBarMove()
 	end)
 	bar:SetPoint(db.point, UIParent, db.relPoint, db.x, db.y)
 	for slot = 1, MAX_SLOTS do
@@ -1492,6 +1513,7 @@ ev:SetScript("OnEvent", guard("event", function(self, event, arg1, ...)
 			if attachPending then applyAttach() end
 			if mousePending then applyBarMouse() end
 			if auxPending then applyAux() end
+			if barMoving then stopBarMove() end
 			if previewing then layout() else refreshAll() end   -- catch what changed during the fight; make new totems clickable
 		end
 	elseif event == "PLAYER_TOTEM_UPDATE" then

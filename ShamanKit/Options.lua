@@ -387,7 +387,7 @@ function ns.buildOptions()
 	local unlockIcons = icons.add(checkbox(p3, "Unlock to drag the icons", "locked", LEFT, -356,
 		function() return ns.get().locked == false end,
 		function(on) ns.get().locked = not on end))
-	note(p3, "Only for \"Own place\" below (it unlocks the totem bar\ntoo). Sample icons show while it is ticked.", LEFT + 28, -384)
+	note(p3, "Only for \"Own place\" (it unlocks the totem bar too).\nDrag them while this page is open: sample icons show\nonly then. Or use the screen-position sliders.", LEFT + 28, -384)
 	local resetIcons = CreateFrame("Button", nil, p3, "UIPanelButtonTemplate")
 	resetIcons:SetSize(160, 24)
 	resetIcons:SetPoint("TOPLEFT", LEFT, -424)

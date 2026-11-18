@@ -21,7 +21,7 @@ local function mock(kind)
 	return setmetatable(o, { __index = function(t, k)
 		-- secure (protected) frames refuse these in combat, exactly like the real client: the popup the user saw
 		if rawget(t, "protected") and InCombatLockdown() and (k == "SetPoint" or k == "ClearAllPoints" or k == "SetSize"
-			or k == "Show" or k == "Hide" or k == "SetShown" or k == "SetAttribute" or k == "EnableMouse" or k == "SetParent") then
+			or k == "Show" or k == "Hide" or k == "SetShown" or k == "SetAttribute" or k == "EnableMouse" or k == "SetParent" or k == "StartMoving" or k == "StopMovingOrSizing") then
 			return function() error("ADDON_ACTION_BLOCKED: " .. k .. " on a protected frame in combat") end
 		end
 		if k == "SetAttribute" then return function(self, n, v) self.attrs[n] = v end end
@@ -1199,17 +1199,32 @@ do
 		check(W().shown, "a missing warn setting means 2 minutes")
 		db.auxWarnMin = 2; enchants = {}; second()
 
-		-- unlocked and on its own: the samples are there to grab, without opening the settings
+		-- A SAMPLE LOOKS EXACTLY LIKE THE REAL ICON, so it must never stay on screen: with the frames unlocked and the
+		-- icons in a place of their own (the reported case) a fine enchant and no shield must show NOTHING.
 		enchants = { { hasEnchant = true, timeLeft = 1800000 } }; auras["Lightning Shield"] = nil; fire("UNIT_AURA", "player"); second()
 		db.locked = true; db.auxAnchor = "free"; ns.optionsOpen = false; ns.updatePreview()
 		check(not W().shown and not S().shown, "locked and detached: nothing to see when all is well")
-		db.locked = false; ns.updatePreview()
-		check(W().shown and S().shown, "unlocked and detached: sample icons to drag, settings closed")
+		db.locked = false; ns.updatePreview(); second(); fire("UNIT_AURA", "player")
+		check(not W().shown, "REPORTED BUG: unlocked + own place + enchant present: the weapon icon must NOT show")
+		check(not S().shown, "REPORTED BUG: unlocked + own place + no Lightning Shield: the shield icon must NOT show")
+		for _ = 1, 3 do second() end
+		check(not W().shown and not S().shown, "...and it stays that way")
+		-- the real things still show, unlocked or not
+		enchants = {}; second()
+		check(W().shown and W().glow.shown, "unlocked, own place: a really missing enchant shows")
+		enchants = { { hasEnchant = true, timeLeft = 1800000 } }; second()
+		check(not W().shown, "unlocked, own place: enchant back -> gone")
 		auras["Lightning Shield"] = { applications = 2 }; fire("UNIT_AURA", "player")
-		check(S().count.text == "2", "unlocked and detached: the real shield wins over the sample")
+		check(S().shown and S().count.text == "2", "unlocked, own place: a real shield shows with its charges")
 		auras["Lightning Shield"] = nil; fire("UNIT_AURA", "player")
+		check(not S().shown, "unlocked, own place: shield gone -> gone")
+		-- samples belong to an open settings page only
+		ns.optionsOpen = true; ns.updatePreview()
+		check(W().shown and S().shown, "settings page open: samples of both")
+		ns.optionsOpen = false; ns.updatePreview()
+		check(not W().shown and not S().shown, "settings page closed: samples gone, whatever the lock or place")
 		db.auxAnchor = "bar"; ns.updatePreview()
-		check(not W().shown and not S().shown, "unlocked but attached: no samples (the bar is what you drag)")
+		check(not W().shown and not S().shown, "unlocked but attached: nothing either")
 		db.locked = true; ns.updatePreview()
 		db.auxAnchor = "bar"
 	end
@@ -1257,7 +1272,7 @@ do
 		db.locked = false; ns.updatePreview(); W().scripts.OnDragStart(W())
 		check(not moved, "player frame: the icons are not draggable")
 		enchants = { { hasEnchant = true, timeLeft = 1800000 } }; auras["Lightning Shield"] = nil; second()
-		check(not W().shown and not S().shown, "player frame, unlocked: no sample icons (they are only for 'own place')")
+		check(not W().shown and not S().shown, "player frame, unlocked: no sample icons")
 		db.locked = true
 		-- in a fight the move waits
 		db.auxAnchor = "bar"; ns.updatePreview()
@@ -1279,6 +1294,63 @@ do
 		t = mig({ showRange = false }); check(t.showOut == false, "migrate: the old single range switch hid both marks")
 		t = mig({ showRange = false, showOut = true }); check(t.showOut == true, "migrate: an explicit cross setting is kept")
 		check(ns.defaults.auxAttached == nil and ns.defaults.auxAnchor == "bar", "defaults: auxAnchor replaces auxAttached")
+	end
+
+	-- ---- dragging: only out of combat, only what really started, nothing saved otherwise
+	do
+		db.locked = false; db.attach = false; db.auxAnchor = "bar"; db.x, db.y, db.point = 5, 6, "TOP"; db.auxX, db.auxY, db.auxPoint = 7, 8, "LEFT"
+		inCombat = false; fire("PLAYER_REGEN_ENABLED")
+		local B = bar()
+		local H = _G.ShamanKitHit2
+		-- in combat the (protected) bar and its click buttons are never asked to move: the mock raises
+		-- ADDON_ACTION_BLOCKED for StartMoving / StopMovingOrSizing on them, as the real game did in the log
+		inCombat = true; fire("PLAYER_REGEN_DISABLED")
+		local ok1, e1 = pcall(B.scripts.OnDragStart, B)
+		local ok2, e2 = pcall(H.scripts.OnDragStart, H)
+		local ok3, e3 = pcall(B.scripts.OnDragStop, B)
+		local ok4, e4 = pcall(H.scripts.OnDragStop, H)
+		check(ok1 and ok2 and ok3 and ok4, "drag in combat: the bar is not touched (no blocked action)" .. ((not (ok1 and ok2 and ok3 and ok4)) and (" -> " .. tostring(e1 or e2 or e3 or e4)) or ""))
+		check(db.x == 5 and db.y == 6 and db.point == "TOP", "drag in combat: nothing was saved")
+		inCombat = false; fire("PLAYER_REGEN_ENABLED")
+		-- out of combat a drag moves and saves
+		local started, stopped = 0, 0
+		rawset(B, "StartMoving", function() started = started + 1 end)
+		rawset(B, "StopMovingOrSizing", function() stopped = stopped + 1 end)
+		H.scripts.OnDragStart(H)
+		check(started == 1, "drag out of combat, started on a totem icon: the bar moves")
+		H.scripts.OnDragStop(H)
+		check(stopped == 1 and db.x == 10 and db.y == 20 and db.point == "CENTER", "drag out of combat: finished and the place saved")
+		-- a drag that never started saves nothing
+		db.x, db.y, db.point = 5, 6, "TOP"; stopped = 0
+		B.scripts.OnDragStop(B)
+		check(stopped == 0 and db.x == 5 and db.point == "TOP", "a drag that never started: not finished, nothing saved")
+		db.locked = true; B.scripts.OnDragStart(B); started = 0; B.scripts.OnDragStart(B)
+		check(started == 0, "locked: the bar does not move")
+		db.locked = false; db.attach = true; B.scripts.OnDragStart(B)
+		check(started == 0, "bar under the player frame: it does not move")
+		db.attach = false
+		-- a fight that starts in the middle of a drag: finished (and saved) when it ends, not during
+		B.scripts.OnDragStart(B)
+		check(started == 1, "mid-drag: started")
+		inCombat = true; fire("PLAYER_REGEN_DISABLED")
+		local okm = pcall(B.scripts.OnDragStop, B)
+		check(okm and stopped == 0, "mid-drag fight: no call into the restricted bar during the fight")
+		inCombat = false; db.x = 5; fire("PLAYER_REGEN_ENABLED")
+		check(stopped == 1 and db.x == 10, "mid-drag fight: finished when it ends and the place saved")
+		rawset(B, "StartMoving", nil); rawset(B, "StopMovingOrSizing", nil)
+		-- the buff icons: only a drag that started saves a place; attached icons never overwrite it
+		db.auxAnchor = "bar"; db.locked = false
+		W().scripts.OnDragStop(W())
+		check(db.auxX == 7 and db.auxY == 8 and db.auxPoint == "LEFT", "icons attached: a stray drag-stop does not overwrite the own place with a bar-relative spot")
+		db.auxAnchor = "free"; ns.updatePreview()
+		rawset(aux, "StartMoving", function() end)
+		W().scripts.OnDragStop(W())
+		check(db.auxX == 7 and db.auxPoint == "LEFT", "icons: a drag that never started saves nothing")
+		inCombat = true; fire("PLAYER_REGEN_DISABLED"); W().scripts.OnDragStart(W()); W().scripts.OnDragStop(W())
+		check(db.auxX == 7, "icons: no drag in combat")
+		inCombat = false; fire("PLAYER_REGEN_ENABLED")
+		rawset(aux, "StartMoving", nil)
+		db.locked = true; db.auxAnchor = "bar"; ns.updatePreview()
 	end
 
 	-- ---- the settings pages
