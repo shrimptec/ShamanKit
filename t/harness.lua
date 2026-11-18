@@ -118,7 +118,17 @@ function GetTotemInfo(slot)
 	return true, d.name, d.start, d.dur, d.icon
 end
 local auras = {}
-C_UnitAuras = { GetAuraDataBySpellName = function(_, name) if secretPos then return secret() end return auras[name] end }
+AURAS_HIDDEN = false   -- a fight: the game hides auras
+IDAURAS = {}           -- what a lookup by spell id still answers while they are hidden
+C_Secrets = { ShouldAurasBeSecret = function() return AURAS_HIDDEN end }
+C_UnitAuras = {
+	GetAuraDataBySpellName = function(_, name)
+		if secretPos then return secret() end
+		if AURAS_HIDDEN then return nil end     -- seen in the real log: "nothing", not a secret, even though the aura is there
+		return auras[name]
+	end,
+	GetPlayerAuraBySpellID = function(id) return IDAURAS[id] end,
+}
 
 local savedCat
 local allCats = {}
@@ -242,6 +252,11 @@ check(btn(2).mark.shown and btn(2).mark.tex:find("Waiting"), "no position and no
 C_UnitAuras.GetAuraDataBySpellName = realAura
 C_UnitAuras.GetAuraDataBySpellName = realAura
 inCombat = false
+-- a fight hides auras: the lookup says "nothing" although the buff is there. That is not "out of range".
+auras["Strength of Earth"] = {}; AURAS_HIDDEN = true; inCombat = true; tick()
+check(btn(2).mark.shown and btn(2).mark.tex:find("Waiting") and not btn(2).mark.tex:find("NotReady"), "REPORTED CLASS: no position, auras hidden in a fight, buff present: yellow ?, never 'out of range'")
+AURAS_HIDDEN = false; inCombat = false; tick()
+check(btn(2).mark.tex:find("Ready") and not btn(2).mark.tex:find("NotReady"), "fight over: the buff reading is trusted again")
 
 -- Totemic Call: walk out of range, cast it, totems follow you
 totems[2] = { name = "Strength of Earth Totem IV", start = t, dur = 300, icon = 99 }
@@ -1041,13 +1056,56 @@ do
 	check(S().shown, "shield: a hidden charge number still shows the icon")
 	auras["Lightning Shield"] = { applications = 3 }; fire("UNIT_AURA", "player")
 	secretPos = true; fire("UNIT_AURA", "player")
-	check(S().shown and S().count.text == "3", "shield: an unreadable aura list keeps the icon as it was")
+	check(S().shown and S().count.text == "?", "shield: an unreadable aura list keeps the icon, the number becomes ? (not known any more)")
 	secretPos = false
 	auras["Lightning Shield"] = nil; fire("UNIT_AURA", "player")
 	check(not S().shown, "shield: gone -> icon hidden")
 	secretPos = true; fire("UNIT_AURA", "player")
 	check(not S().shown, "shield: an unreadable aura list does not invent a shield")
 	secretPos = false
+
+	-- THE REPORTED BUG: "as soon as I get into combat it just disappears". In a fight the game hides auras and the
+	-- lookup by name answers "nothing" although the shield is there.
+	do
+		secretPos = false; AURAS_HIDDEN = false; IDAURAS = {}; db.shieldOn = true; inCombat = false
+		auras["Lightning Shield"] = { applications = 3 }; fire("UNIT_AURA", "player")
+		check(S().shown and S().count.text == "3", "fight test: shield up out of combat, 3 charges")
+		local real = auras["Lightning Shield"]
+		AURAS_HIDDEN = true; inCombat = true; fire("PLAYER_REGEN_DISABLED")   -- from here a lookup by name says "nothing"
+		check(S().shown, "REPORTED BUG: the fight starts and the game answers 'nothing': the shield icon STAYS")
+		check(S().count.text == "?", "the number becomes ? (it can't be read, and 3 may be wrong now)")
+		for _ = 1, 5 do second(); fire("UNIT_AURA", "player") end
+		check(S().shown and S().count.text == "?", "...and stays through the whole fight, polls and aura events")
+		local seen
+		for _, l in ipairs(ShamanKitDB.log or {}) do if l:find("SHIELD auras hidden") then seen = l end end
+		check(seen ~= nil, "the log says what the game let us read, once per fight")
+		-- a lookup by spell id that still answers during the fight keeps the number live
+		IDAURAS[324] = { applications = 2 }; fire("UNIT_AURA", "player")
+		check(S().shown and S().count.text == "2", "by spell id still works in the fight: the number is live (2)")
+		IDAURAS[324].applications = 1; fire("UNIT_AURA", "player")
+		check(S().count.text == "1", "...and follows (1)")
+		IDAURAS = {}; fire("UNIT_AURA", "player")
+		check(S().shown and S().count.text == "?", "by spell id stops answering: back to ?, icon stays")
+		-- fight over: auras readable again, the icon is right at once (no wait for the 1 s look)
+		AURAS_HIDDEN = false; inCombat = false; auras["Lightning Shield"] = { applications = 2 }
+		fire("PLAYER_REGEN_ENABLED")
+		check(S().shown and S().count.text == "2", "fight over: the real number (2) is back at once")
+		-- the shield really goes while no fight: hidden
+		auras["Lightning Shield"] = nil; fire("UNIT_AURA", "player")
+		check(not S().shown, "out of combat the shield is gone: icon hidden (a 'nothing' IS believed when auras are readable)")
+		-- no shield before a fight: the fight does not invent one
+		AURAS_HIDDEN = true; inCombat = true; fire("PLAYER_REGEN_DISABLED"); second(); fire("UNIT_AURA", "player")
+		check(not S().shown, "no shield before the fight: still none during it")
+		AURAS_HIDDEN = false; inCombat = false; fire("PLAYER_REGEN_ENABLED")
+		-- a hidden-aura answer of an API that does not exist here: a fight is assumed to hide them
+		local sec = C_Secrets; C_Secrets = nil
+		auras["Lightning Shield"] = { applications = 3 }; fire("UNIT_AURA", "player")
+		inCombat = true; AURAS_HIDDEN = true; fire("PLAYER_REGEN_DISABLED")
+		check(S().shown, "no ShouldAurasBeSecret on this client: in a fight 'nothing' is still not believed")
+		inCombat = false; AURAS_HIDDEN = false; fire("PLAYER_REGEN_ENABLED"); C_Secrets = sec
+		auras["Lightning Shield"] = nil; fire("UNIT_AURA", "player")
+		noErrors("fight test: no error in the log")
+	end
 
 	-- the switches
 	db.weaponOn = false; ns.updatePreview()
