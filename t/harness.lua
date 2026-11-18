@@ -127,7 +127,14 @@ C_UnitAuras = {
 		if AURAS_HIDDEN then return nil end     -- seen in the real log: "nothing", not a secret, even though the aura is there
 		return auras[name]
 	end,
-	GetPlayerAuraBySpellID = function(id) return IDAURAS[id] end,
+	-- in a fight the game still answers for an aura you already know by instance id (IDAURAS), and a scan finds it too
+	GetAuraDataByAuraInstanceID = function(_, id) return IDAURAS[id] end,
+	GetAuraDataByIndex = function(_, i)
+		local list = {}
+		for _, d in pairs(IDAURAS) do list[#list + 1] = d end
+		table.sort(list, function(a, b) return a.auraInstanceID < b.auraInstanceID end)
+		return list[i]
+	end,
 }
 
 local savedCat
@@ -1056,7 +1063,7 @@ do
 	check(S().shown, "shield: a hidden charge number still shows the icon")
 	auras["Lightning Shield"] = { applications = 3 }; fire("UNIT_AURA", "player")
 	secretPos = true; fire("UNIT_AURA", "player")
-	check(S().shown and S().count.text == "?", "shield: an unreadable aura list keeps the icon, the number becomes ? (not known any more)")
+	check(S().shown and S().count.text == "3", "shield: an unreadable aura list keeps the icon and the last number")
 	secretPos = false
 	auras["Lightning Shield"] = nil; fire("UNIT_AURA", "player")
 	check(not S().shown, "shield: gone -> icon hidden")
@@ -1159,45 +1166,74 @@ do
 		noErrors("weapon mode: no error in the log")
 	end
 
-	-- THE REPORTED BUG: "as soon as I get into combat it just disappears". In a fight the game hides auras and the
-	-- lookup by name answers "nothing" although the shield is there.
+	-- THE REPORTED BUGS: (1) the icon vanished at every fight start, (2) then it said "charges can't be read" instead of
+	-- behaving like the normal buff icon. In a fight the lookup by name says "nothing"; the aura is followed by instance id.
 	do
-		secretPos = false; AURAS_HIDDEN = false; IDAURAS = {}; db.shieldOn = true; inCombat = false
-		auras["Lightning Shield"] = { applications = 3 }; fire("UNIT_AURA", "player")
+		secretPos = false; AURAS_HIDDEN = false; IDAURAS = {}; db.shieldOn = true; inCombat = false; ShamanKitDB.log = {}
+		local live = { applications = 3, auraInstanceID = 77, spellId = 324 }
+		auras["Lightning Shield"] = live; IDAURAS[77] = live; fire("UNIT_AURA", "player")
 		check(S().shown and S().count.text == "3", "fight test: shield up out of combat, 3 charges")
-		local real = auras["Lightning Shield"]
-		AURAS_HIDDEN = true; inCombat = true; fire("PLAYER_REGEN_DISABLED")   -- from here a lookup by name says "nothing"
-		check(S().shown, "REPORTED BUG: the fight starts and the game answers 'nothing': the shield icon STAYS")
-		check(S().count.text == "?", "the number becomes ? (it can't be read, and 3 may be wrong now)")
-		for _ = 1, 5 do second(); fire("UNIT_AURA", "player") end
-		check(S().shown and S().count.text == "?", "...and stays through the whole fight, polls and aura events")
+		AURAS_HIDDEN = true; inCombat = true; auras["Lightning Shield"] = nil   -- from here a lookup by name says "nothing"
+		fire("PLAYER_REGEN_DISABLED")
+		check(S().shown and S().count.text == "3", "REPORTED BUG: the fight starts: the icon STAYS and shows the real number, like the normal buff icon")
+		check(S().count.color and S().count.color[1] == 1 and S().count.color[2] == 1, "...in the normal white, no warning colour")
+		live.applications = 2; fire("UNIT_AURA", "player", { updatedAuraInstanceIDs = { 77 } })
+		check(S().shown and S().count.text == "2", "a charge is used in the fight: 2, live")
+		live.applications = 1; fire("UNIT_AURA", "player", { updatedAuraInstanceIDs = { 77 } })
+		check(S().count.text == "1", "...1, live")
+		for _ = 1, 5 do second() end
+		check(S().shown and S().count.text == "1", "polls in the fight keep it")
+		check(not tostring(S().tipLine):find("can't be read"), "no 'can't be read' text anywhere")
 		local seen
 		for _, l in ipairs(ShamanKitDB.log or {}) do if l:find("SHIELD auras hidden") then seen = l end end
-		check(seen ~= nil, "the log says what the game let us read, once per fight")
-		-- a lookup by spell id that still answers during the fight keeps the number live
-		IDAURAS[324] = { applications = 2 }; fire("UNIT_AURA", "player")
-		check(S().shown and S().count.text == "2", "by spell id still works in the fight: the number is live (2)")
-		IDAURAS[324].applications = 1; fire("UNIT_AURA", "player")
-		check(S().count.text == "1", "...and follows (1)")
-		IDAURAS = {}; fire("UNIT_AURA", "player")
-		check(S().shown and S().count.text == "?", "by spell id stops answering: back to ?, icon stays")
-		-- fight over: auras readable again, the icon is right at once (no wait for the 1 s look)
-		AURAS_HIDDEN = false; inCombat = false; auras["Lightning Shield"] = { applications = 2 }
+		check(seen ~= nil and seen:find("instance id"), "the log says the route used in the fight")
+		-- the last charge is used and the aura goes: the game says so by instance id
+		IDAURAS[77] = nil; fire("UNIT_AURA", "player", { removedAuraInstanceIDs = { 77 } })
+		check(not S().shown, "the shield ends in the fight: the game says it was removed -> icon hidden at once")
+		-- instance id lookup refused, but a scan finds it (and a re-cast shield gets a new id)
+		AURAS_HIDDEN = false; inCombat = false; fire("PLAYER_REGEN_ENABLED")
+		local live2 = { applications = 3, auraInstanceID = 88, spellId = 324 }
+		auras["Lightning Shield"] = live2; fire("UNIT_AURA", "player")
+		AURAS_HIDDEN = true; inCombat = true; auras["Lightning Shield"] = nil; fire("PLAYER_REGEN_DISABLED")
+		IDAURAS[88] = live2
+		local byId = C_UnitAuras.GetAuraDataByAuraInstanceID
+		C_UnitAuras.GetAuraDataByAuraInstanceID = function() return nil end
+		t = t + 1; live2.applications = 2; fire("UNIT_AURA", "player", { updatedAuraInstanceIDs = { 88 } })
+		check(S().shown and S().count.text == "2", "instance id refused: a scan of the buffs finds the same aura (2)")
+		C_UnitAuras.GetAuraDataByAuraInstanceID = byId
+		-- nothing readable at all: the icon stays with the last number, a little grey
+		t = t + 1; IDAURAS = {}; fire("UNIT_AURA", "player", {})
+		check(S().shown and S().count.text == "2", "nothing readable in the fight: icon and last number stay")
+		check(S().count.color[1] < 0.9, "...a little grey, so it is not claimed as live")
+		-- fight over: the real number at once
+		AURAS_HIDDEN = false; inCombat = false; auras["Lightning Shield"] = { applications = 1, auraInstanceID = 99, spellId = 324 }
 		fire("PLAYER_REGEN_ENABLED")
-		check(S().shown and S().count.text == "2", "fight over: the real number (2) is back at once")
-		-- the shield really goes while no fight: hidden
+		check(S().shown and S().count.text == "1" and S().count.color[1] == 1, "fight over: the real number (1) is back at once, white")
+		-- no shield: hidden; and a fight does not invent one
 		auras["Lightning Shield"] = nil; fire("UNIT_AURA", "player")
 		check(not S().shown, "out of combat the shield is gone: icon hidden (a 'nothing' IS believed when auras are readable)")
-		-- no shield before a fight: the fight does not invent one
-		AURAS_HIDDEN = true; inCombat = true; fire("PLAYER_REGEN_DISABLED"); second(); fire("UNIT_AURA", "player")
+		AURAS_HIDDEN = true; inCombat = true; fire("PLAYER_REGEN_DISABLED"); second(); fire("UNIT_AURA", "player", {})
 		check(not S().shown, "no shield before the fight: still none during it")
 		AURAS_HIDDEN = false; inCombat = false; fire("PLAYER_REGEN_ENABLED")
 		-- a hidden-aura answer of an API that does not exist here: a fight is assumed to hide them
 		local sec = C_Secrets; C_Secrets = nil
-		auras["Lightning Shield"] = { applications = 3 }; fire("UNIT_AURA", "player")
-		inCombat = true; AURAS_HIDDEN = true; fire("PLAYER_REGEN_DISABLED")
-		check(S().shown, "no ShouldAurasBeSecret on this client: in a fight 'nothing' is still not believed")
+		local live3 = { applications = 3, auraInstanceID = 5, spellId = 324 }
+		auras["Lightning Shield"] = live3; IDAURAS[5] = live3; fire("UNIT_AURA", "player")
+		inCombat = true; AURAS_HIDDEN = true; auras["Lightning Shield"] = nil; fire("PLAYER_REGEN_DISABLED")
+		check(S().shown and S().count.text == "3", "no ShouldAurasBeSecret on this client: a fight is still assumed to hide auras")
 		inCombat = false; AURAS_HIDDEN = false; fire("PLAYER_REGEN_ENABLED"); C_Secrets = sec
+		auras["Lightning Shield"] = nil; IDAURAS = {}; fire("UNIT_AURA", "player")
+		-- cost: a burst of messages in a fight does not look through the buffs every time
+		local live4 = { applications = 3, auraInstanceID = 6, spellId = 324 }
+		auras["Lightning Shield"] = live4; IDAURAS[6] = live4; fire("UNIT_AURA", "player")
+		AURAS_HIDDEN = true; inCombat = true; auras["Lightning Shield"] = nil; fire("PLAYER_REGEN_DISABLED")
+		local scans = 0; local gi = C_UnitAuras.GetAuraDataByIndex
+		C_UnitAuras.GetAuraDataByIndex = function(...) scans = scans + 1 return gi(...) end
+		C_UnitAuras.GetAuraDataByAuraInstanceID = function() return nil end
+		for _ = 1, 50 do fire("UNIT_AURA", "player", {}) end
+		check(scans < 12, "cost: 50 messages in one instant do not cause 50 scans (" .. scans .. ")")
+		C_UnitAuras.GetAuraDataByIndex = gi; C_UnitAuras.GetAuraDataByAuraInstanceID = byId
+		AURAS_HIDDEN = false; inCombat = false; fire("PLAYER_REGEN_ENABLED"); IDAURAS = {}
 		auras["Lightning Shield"] = nil; fire("UNIT_AURA", "player")
 		noErrors("fight test: no error in the log")
 	end
