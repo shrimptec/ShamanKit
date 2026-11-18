@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# Publish TotemRange as a release of the public GitHub repo shrimptec/TotemRange, which is where
+# Publish ShamanKit as a release of the public GitHub repo shrimptec/ShamanKit, which is where
 # the wowupd addon manager pulls updates from.
 #
 #   ./release.sh patch|minor|major|X.Y.Z  ["release notes"]
 #
-# It runs the checks, bumps `## Version:` in the .toc, builds TotemRange-vX.Y.Z-forever.zip
-# (folder TotemRange/ at the top, the layout wowupd and the game need), commits, tags vX.Y.Z,
+# It runs the checks, bumps `## Version:` in the .toc, builds ShamanKit-vX.Y.Z-forever.zip
+# (folder ShamanKit/ at the top, the layout wowupd and the game need), commits, tags vX.Y.Z,
 # pushes, creates the GitHub release and downloads the asset back to prove it is intact.
 # The tag, the .toc version and the zip name always carry the same number: wowupd compares them.
 set -euo pipefail
 cd "$(dirname "$0")"
 
-REPO="shrimptec/TotemRange"
-NAME="TotemRange"
+REPO="shrimptec/ShamanKit"
+NAME="ShamanKit"
 TOC="$NAME/$NAME.toc"
 BUMP="${1:-}"
 NOTES="${2:-}"

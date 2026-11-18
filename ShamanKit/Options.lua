@@ -1,8 +1,9 @@
--- TotemRange settings: Esc > Options > AddOns > TotemRange (three pages), or /totemrange
+-- ShamanKit settings: Esc > Options > AddOns > ShamanKit (a home page and three pages), or /shamankit
 -- Built from plain Blizzard textures (slider bar/thumb, check box, radio button) so it looks like the stock panels.
---   TotemRange   the icons, the range display and where the bar sits
---   Totems       order of the totems, keeping a place open, the placeholder icon
---   Small icons  the weapon-enchant and Lightning Shield icons
+--   ShamanKit   home page: what is here, and buttons to the pages
+--   Totem bar   the icons, the range display and where the bar sits
+--   Totems      order of the totems, keeping a place open, the placeholder icon
+--   Buffs       the weapon-enchant and Lightning Shield icons
 
 local ADDON, ns = ...
 
@@ -181,12 +182,33 @@ function ns.buildOptions()
 		return page
 	end
 
-	-- ------------------------------------------------------------ page 1: the bar
-	local main = newPage("TotemRange", "TotemRange",
+	-- ------------------------------------------------------------ home page
+	local home = newPage("ShamanKit", "ShamanKit",
+		"Small helpers for shamans: your totems, and reminders for your weapon enchant and Lightning Shield.", {})
+	local p0 = home.panel
+	local getMeta = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
+	local okv, version = pcall(function() return getMeta and getMeta(ADDON, "Version") end)
+	if okv and type(version) == "string" and version ~= "" then note(p0, "Version " .. version, 16, -62) end
+	header(p0, "Pages", LEFT, -88, 580)
+	local function pageButton(label, which, y, text)
+		local b = CreateFrame("Button", nil, p0, "UIPanelButtonTemplate")
+		b:SetSize(140, 24)
+		b:SetPoint("TOPLEFT", LEFT, y)
+		b:SetText(label)
+		b:SetScript("OnClick", function() ns.openOptions(which) end)
+		note(p0, text, LEFT + 156, y - 6)
+	end
+	pageButton("Totem bar", "bar", -116, "Your active totems, their time left, range, and where the bar sits.")
+	pageButton("Totems", "totems", -150, "The order of the totems, and a place kept open for each.")
+	pageButton("Buffs", "buffs", -184, "Icons for a missing weapon enchant and your Lightning Shield charges.")
+	header(p0, "Commands", LEFT, -236, 580)
+	note(p0, "/shamankit - open this window\n/shamankit bar, totems or buffs - open that page\n/shamankit lock or unlock - lock the frames, or make them draggable\n/shamankit reset - put the bar and the buff icons back in the usual place\n/shamankit status - print what the addon reads (for bug reports)", LEFT, -262)
+
+	-- ------------------------------------------------------------ page 1: the totem bar
+	local main = newPage("Totem bar", "Totem bar",
 		"Your active totems, how long they have left, and whether you are in range of each.",
 		{ "size", "spacing", "vertical", "showTimer", "showRange", "showOut", "tint", "distanceMode", "attach", "attachX", "attachY", "locked" })
 	local p1 = main.panel
-	note(p1, "More pages in the list on the left: Totems (order, placeholders) and Small icons (weapon enchant, Lightning Shield).", 16, -58)
 
 	header(p1, "Totem icons", LEFT, -88, COLW)
 	main.add(slider(p1, "Icon size", "size", 24, 80, LEFT, -114))
@@ -230,7 +252,7 @@ function ns.buildOptions()
 		local d = ns.get()
 		local on = d.attach and true or false
 		enable(offX, on); enable(offY, on)
-		enable(unlock, not on or d.auxAttached == false)
+		enable(unlock, not on or ns.auxMode() == "free")
 	end
 	attach:HookScript("OnClick", mainDependents)
 	main.after[#main.after + 1] = function() distance.refresh(); mainDependents() end
@@ -346,9 +368,9 @@ function ns.buildOptions()
 	end
 
 	-- ------------------------------------------------------------ page 3: the small icons
-	local icons = newPage("Small icons", "Small icons",
+	local icons = newPage("Buffs", "Buffs",
 		"A small icon when your weapon has no enchant, and one with your Lightning Shield charges.",
-		{ "weaponOn", "shieldOn", "auxAttached", "auxSide", "auxAlign", "auxOffX", "auxOffY", "auxScale", "auxWarnMin" })
+		{ "weaponOn", "shieldOn", "auxAnchor", "auxSide", "auxAlign", "auxOffX", "auxOffY", "auxScale", "auxWarnMin" })
 	local p3 = icons.panel
 	icons.onDefault = function() ns.resetAuxPlace() end
 
@@ -365,7 +387,7 @@ function ns.buildOptions()
 	local unlockIcons = icons.add(checkbox(p3, "Unlock to drag the icons", "locked", LEFT, -356,
 		function() return ns.get().locked == false end,
 		function(on) ns.get().locked = not on end))
-	note(p3, "Only when they are not kept with the bar (it unlocks the\nbar too). Sample icons show while it is ticked.", LEFT + 28, -384)
+	note(p3, "Only for \"Own place\" below (it unlocks the totem bar\ntoo). Sample icons show while it is ticked.", LEFT + 28, -384)
 	local resetIcons = CreateFrame("Button", nil, p3, "UIPanelButtonTemplate")
 	resetIcons:SetSize(160, 24)
 	resetIcons:SetPoint("TOPLEFT", LEFT, -424)
@@ -373,65 +395,76 @@ function ns.buildOptions()
 	resetIcons:SetScript("OnClick", function() ns.resetAuxPlace(); icons.refresh() end)
 
 	header(p3, "Position", RIGHT, -78, COLW)
-	local keepWith = icons.add(checkbox(p3, "Keep them with the totem bar", "auxAttached", RIGHT, -104))
+	local anchorLabel = p3:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+	anchorLabel:SetPoint("TOPLEFT", RIGHT, -102)
+	anchorLabel:SetText("Attach to:")
+	local anchor = radioGroup(p3, {
+		{ "bar", "Totem bar" }, { "player", "Player frame" }, { "free", "Own place" },
+	}, RIGHT, -120, 3, 96, 24,
+		function() return ns.auxMode() end,
+		function(v) ns.get().auxAnchor = v end)
+	icons.add(anchor)
 	local sideLabel = p3:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-	sideLabel:SetPoint("TOPLEFT", RIGHT, -140)
-	sideLabel:SetText("Side of the bar:")
+	sideLabel:SetPoint("TOPLEFT", RIGHT, -150)
+	sideLabel:SetText("Side of it:")
 	local side = radioGroup(p3, {
 		{ "auto", "Auto" }, { "bottom", "Below" }, { "top", "Above" }, { "left", "Left" }, { "right", "Right" },
-	}, RIGHT, -160, 3, 76, 24,
+	}, RIGHT, -168, 3, 76, 24,
 		function() local sd = ns.get().auxSide; return (sd == "bottom" or sd == "top" or sd == "left" or sd == "right") and sd or "auto" end,
 		function(v) ns.get().auxSide = v end)
 	icons.add(side)
 	local alignLabel = p3:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-	alignLabel:SetPoint("TOPLEFT", RIGHT, -216)
+	alignLabel:SetPoint("TOPLEFT", RIGHT, -220)
 	alignLabel:SetText("Along that side:")
 	local align = radioGroup(p3, {
 		{ "start", "Start" }, { "center", "Middle" }, { "end", "End" },
-	}, RIGHT, -236, 3, 76, 24,
+	}, RIGHT, -238, 3, 76, 24,
 		function() local a = ns.get().auxAlign; return (a == "center" or a == "end") and a or "start" end,
 		function(v) ns.get().auxAlign = v end)
 	icons.add(align)
-	local nudgeX = icons.add(slider(p3, "Nudge left / right", "auxOffX", -100, 100, RIGHT, -272))
-	local nudgeY = icons.add(slider(p3, "Nudge up / down", "auxOffY", -100, 100, RIGHT, -327))
+	local nudgeX = icons.add(slider(p3, "Nudge left / right", "auxOffX", -100, 100, RIGHT, -270))
+	local nudgeY = icons.add(slider(p3, "Nudge up / down", "auxOffY", -100, 100, RIGHT, -323))
 
-	header(p3, "Own place (when not kept with the bar)", RIGHT, -378, COLW)
-	local ownX = icons.add(slider(p3, "Screen position left / right", "auxX", -1000, 1000, RIGHT, -404, nil, 5))
-	local ownY = icons.add(slider(p3, "Screen position up / down", "auxY", -600, 600, RIGHT, -459, nil, 5))
+	header(p3, "Own place", RIGHT, -374, COLW)
+	local ownX = icons.add(slider(p3, "Screen position left / right", "auxX", -1000, 1000, RIGHT, -400, nil, 5))
+	local ownY = icons.add(slider(p3, "Screen position up / down", "auxY", -600, 600, RIGHT, -453, nil, 5))
 
 	local function iconDependents()
-		local on = ns.get().auxAttached ~= false
+		local on = ns.auxMode() ~= "free"
 		enableGroup(side, on); enableGroup(align, on)
 		enable(nudgeX, on); enable(nudgeY, on)
 		enable(ownX, not on); enable(ownY, not on)
 		enable(unlockIcons, not on)
 	end
-	keepWith:HookScript("OnClick", iconDependents)
-	icons.after[#icons.after + 1] = function() side.refresh(); align.refresh(); iconDependents() end
+	for _, rb in ipairs(anchor.rbs) do rb:HookScript("OnClick", iconDependents) end
+	icons.after[#icons.after + 1] = function() anchor.refresh(); side.refresh(); align.refresh(); iconDependents() end
 
-	-- ------------------------------------------------------------ register: one category, two sub-pages
-	local category = Settings.RegisterCanvasLayoutCategory(p1, "TotemRange")
+	-- ------------------------------------------------------------ register: one category, three sub-pages
+	local category = Settings.RegisterCanvasLayoutCategory(p0, "ShamanKit")
 	Settings.RegisterAddOnCategory(category)
 	ns.category = category
 	local function register(page, name)
-		page.panel.parent = "TotemRange"
+		page.panel.parent = "ShamanKit"
 		if Settings.RegisterCanvasLayoutSubcategory then
 			local ok, sub = pcall(Settings.RegisterCanvasLayoutSubcategory, category, page.panel, name)
 			if ok and sub then return sub end
 		end
 		-- no sub-pages on this client: a category of its own beside the main one
-		local c = Settings.RegisterCanvasLayoutCategory(page.panel, "TotemRange - " .. name)
+		local c = Settings.RegisterCanvasLayoutCategory(page.panel, "ShamanKit - " .. name)
 		Settings.RegisterAddOnCategory(c)
 		return c
 	end
-	ns.categoryTotems = register(totems, "Totems")
-	ns.categoryIcons = register(icons, "Small icons")
+	ns.categories = {
+		bar = register(main, "Totem bar"),
+		totems = register(totems, "Totems"),
+		buffs = register(icons, "Buffs"),
+	}
 end
 
--- which: nil = the main page, "icons" or "totems" = that page
+-- which: nil = the home page, or "bar", "totems", "buffs" (also "icons", the old name of the buffs page)
 function ns.openOptions(which)
-	if not ns.category then print("TotemRange: settings panel unavailable on this client.") return end
-	local c = (which == "icons" and ns.categoryIcons) or (which == "totems" and ns.categoryTotems) or ns.category
+	if not ns.category then print("ShamanKit: settings panel unavailable on this client.") return end
+	local c = (ns.categories and (ns.categories[which] or (which == "icons" and ns.categories.buffs))) or ns.category
 	local ok = pcall(Settings.OpenToCategory, c:GetID())
 	if not ok then pcall(Settings.OpenToCategory, c) end
 end

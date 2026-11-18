@@ -60,7 +60,7 @@ end
 
 local frames = {}
 function CreateFrame(kind, name, parent, tmpl)
-	local f = mock(kind); f.name = name; f.tmpl = tmpl
+	local f = mock(kind); f.name = name; f.tmpl = tmpl; f.parentFrame = parent
 	if tmpl and tmpl:find("Secure") then rawset(f, "protected", true) end
 	if name then _G[name] = f end
 	frames[#frames + 1] = f
@@ -145,31 +145,31 @@ C_Timer = { After = function(_, fn) timers[#timers + 1] = fn end }
 local function runTimers() local t = timers; timers = {}; for _, fn in ipairs(t) do fn() end end
 
 local ns = {}
-local function load(file) local f = assert(loadfile(file)); f("TotemRange", ns) end
-load("TotemRange/TotemRange.lua")
-load("TotemRange/Options.lua")
+local function load(file) local f = assert(loadfile(file)); f("ShamanKit", ns) end
+load("ShamanKit/ShamanKit.lua")
+load("ShamanKit/Options.lua")
 
 local ev
 for _, f in ipairs(frames) do if f.scripts.OnEvent then ev = f end end
 local function fire(e, ...) ev.scripts.OnEvent(ev, e, ...) end
-local function bar() return _G.TotemRangeBar end
-local function btn(i) return _G["TotemRangeButton" .. i] end
+local function bar() return _G.ShamanKitBar end
+local function btn(i) return _G["ShamanKitButton" .. i] end
 local function tick() bar().scripts.OnUpdate(bar(), 0.25) end
 local fails = 0
 local function check(cond, msg) if not cond then fails = fails + 1; print("FAIL: " .. msg) else print("ok:   " .. msg) end end
 local function noErrors(msg)
 	local bad
-	for _, l in ipairs(TotemRangeDB.log or {}) do if l:find("ERROR") then bad = l end end
+	for _, l in ipairs(ShamanKitDB.log or {}) do if l:find("ERROR") then bad = l end end
 	check(bad == nil, msg .. (bad and (" -> " .. bad) or ""))
 end
 
-fire("ADDON_LOADED", "TotemRange")
+fire("ADDON_LOADED", "ShamanKit")
 -- The bar is the anchor of the secure click buttons, so the real client treats it as restricted in combat:
 -- insecure code may not show, hide, move or resize it then (this is what the "action blocked" popup is about).
-rawset(_G.TotemRangeBar, "protected", true)
-check(TotemRangeDB and TotemRangeDB.size == 36, "defaults filled")
+rawset(_G.ShamanKitBar, "protected", true)
+check(ShamanKitDB and ShamanKitDB.size == 36, "defaults filled")
 check(savedCat ~= nil, "settings category registered")
-check(#allCats == 3, "settings: a main page and two sub-pages (" .. #allCats .. " registered)")
+check(#allCats == 4, "settings: a home page and three sub-pages (" .. #allCats .. " registered)")
 -- the older checks talk to "the panel": that is now all three pages at once
 do
 	local pages = {}
@@ -199,20 +199,20 @@ check(btn(2).mark.tex:find("NotReady"), "40 yd away is out of range")
 check(btn(2).icon.color[1] == 0.8, "icon tinted red out of range")
 
 -- the check and the cross are separate options (out of range right now)
-TotemRangeDB.showOut = false; tick()
+ShamanKitDB.showOut = false; tick()
 check(not btn(2).mark.shown, "cross off: nothing drawn out of range")
 check(btn(2).icon.color[1] == 0.8, "cross off: red tint still there")
 pos = { y = 100, x = 125, map = 1 }; tick()
 check(btn(2).mark.shown and btn(2).mark.tex:find("Ready") and not btn(2).mark.tex:find("NotReady"), "cross off: check still drawn in range")
-TotemRangeDB.showRange = false; tick()
+ShamanKitDB.showRange = false; tick()
 check(not btn(2).mark.shown, "check off: nothing drawn in range")
 pos = { y = 100, x = 140, map = 1 }; tick()
 check(not btn(2).mark.shown, "both off: nothing drawn out of range")
-TotemRangeDB.showOut = true; tick()
+ShamanKitDB.showOut = true; tick()
 check(btn(2).mark.shown and btn(2).mark.tex:find("NotReady"), "check off, cross on: cross drawn out of range")
 pos = { y = 100, x = 125, map = 1 }; tick()
 check(not btn(2).mark.shown, "check off, cross on: nothing drawn in range")
-TotemRangeDB.showRange = true; tick()
+ShamanKitDB.showRange = true; tick()
 pos = { y = 100, x = 140, map = 1 }; tick()
 check(btn(2).mark.shown and btn(2).mark.tex:find("NotReady"), "both back on: cross drawn again")
 
@@ -271,12 +271,12 @@ pos = { y = 100, x = 100, map = 1 }; tick()
 check(btn(2).mark.tex:find("NotReady"), "and the OLD spot is now out of range")
 
 -- right-click dismiss: a secure button per slot with the built-in destroytotem action
-local hit2 = _G.TotemRangeHit2
+local hit2 = _G.ShamanKitHit2
 check(hit2 and hit2.tmpl == "SecureActionButtonTemplate", "slot buttons are secure action buttons")
 check(hit2.attrs["*type2"] == "destroytotem" and hit2.attrs["totem-slot"] == 2, "right-click is the built-in destroytotem action for that slot")
 check(hit2.attrs["type1"] == nil and hit2.attrs["*type1"] == nil, "left-click does nothing")
 check(hit2.mouse == true, "a shown totem's button takes clicks")
-check(_G.TotemRangeHit1.mouse == false and _G.TotemRangeHit4.mouse == false, "empty slots' buttons don't block the mouse")
+check(_G.ShamanKitHit1.mouse == false and _G.ShamanKitHit4.mouse == false, "empty slots' buttons don't block the mouse")
 check(hit2.scripts.OnClick == nil, "no insecure OnClick (that is what the game blocked)")
 
 -- IN COMBAT (flag hidden, name/start/icon hidden, position readable - as the real log showed)
@@ -307,12 +307,12 @@ check(hit2.mouse == true, "combat: nothing touched the protected buttons (no ADD
 -- a totem placed in combat appears; its button stays unclickable until combat ends
 totems[3] = { name = "Searing Totem III", start = t, dur = 60, icon = 7 }
 fire("PLAYER_TOTEM_UPDATE", 3)
-check(btn(3).shown and _G.TotemRangeHit3.mouse == false, "combat: new totem visible, its button not yet clickable")
+check(btn(3).shown and _G.ShamanKitHit3.mouse == false, "combat: new totem visible, its button not yet clickable")
 noErrors("combat with protected frames locked: no blocked actions in the log")
 secretMode = false; inCombat = false
 fire("PLAYER_REGEN_ENABLED"); tick()
 check(btn(2).shown and btn(3).shown, "combat over: resync keeps the live totems")
-check(_G.TotemRangeHit3.mouse == true and _G.TotemRangeHit2.mouse == true and _G.TotemRangeHit4.mouse == false, "combat over: clickable exactly where totems are")
+check(_G.ShamanKitHit3.mouse == true and _G.ShamanKitHit2.mouse == true and _G.ShamanKitHit4.mouse == false, "combat over: clickable exactly where totems are")
 totems[3] = nil; fire("PLAYER_TOTEM_UPDATE", 3)
 
 -- unit position blocked, map position works (e.g. in combat): distance still comes out
@@ -346,13 +346,13 @@ panel.scripts.OnHide()
 local saved2 = totems[2]; totems[2] = nil; fire("PLAYER_TOTEM_UPDATE", 2)
 panel.scripts.OnShow()
 check(btn(1).shown and btn(4).shown, "preview shows 4 sample totems with the panel open")
-TotemRangeDB.size = 50; panel.OnRefresh(); 
+ShamanKitDB.size = 50; panel.OnRefresh(); 
 local sl
 for _, f in ipairs(frames) do if f.kind == "Slider" and f.scripts.OnValueChanged then sl = f; break end end
 sl.scripts.OnValueChanged(sl, 60)
-check(TotemRangeDB.size == 60 and btn(1).w == 60, "size slider resizes icons")
+check(ShamanKitDB.size == 60 and btn(1).w == 60, "size slider resizes icons")
 check(bar().w == 4 * 60 + 3 * 4, "bar width fits 4 icons + spacing")
-TotemRangeDB.vertical = true; ns.updatePreview()
+ShamanKitDB.vertical = true; ns.updatePreview()
 check(bar().h == 4 * 60 + 3 * 4 and bar().w == 60, "vertical layout swaps the axis")
 -- a real totem appears while the samples are up: samples go, the real one is tracked from this spot
 pos = { y = 10, x = 10, map = 1 }
@@ -374,53 +374,53 @@ bar().SetPoint = function(self, ...) pts[#pts + 1] = { ... } end
 local att
 for _, f in ipairs(frames) do if f.text == "Replace the default totem timers (stays under the player frame)" then att = f end end
 for _, f in ipairs(frames) do if f.kind == "CheckButton" and f.scripts.OnClick then end end
-TotemRangeDB.attach = true; ns.updatePreview()
+ShamanKitDB.attach = true; ns.updatePreview()
 check(TotemFrame.alpha == 0, "Blizzard totem timers made invisible when attached")
 local last = pts[#pts]
 check(last[1] == "TOPLEFT" and last[2] == PlayerFrame and last[3] == "BOTTOMLEFT" and last[4] == 65, "bar anchored under the player frame")
 TotemFrame:SetAlpha(1)
 check(TotemFrame.alpha == 0, "Blizzard re-showing its frame is undone")
-TotemRangeDB.attach = false; ns.updatePreview()
+ShamanKitDB.attach = false; ns.updatePreview()
 check(TotemFrame.alpha == 1, "Blizzard timers restored when detached")
 check(pts[#pts][2] == UIParent, "bar back on its saved screen position")
 
 -- exact distance under each totem
 pos = { y = 100, x = 100, map = 1 }; fire("PLAYER_ENTERING_WORLD"); fire("PLAYER_TOTEM_UPDATE", 2)
 pos = { y = 100, x = 112.4, map = 1 }
-TotemRangeDB.distanceMode = "off"; tick()
+ShamanKitDB.distanceMode = "off"; tick()
 check(not btn(2).dist.shown, "distance hidden when the option is off")
-TotemRangeDB.distanceMode = "yards"; tick()
+ShamanKitDB.distanceMode = "yards"; tick()
 check(btn(2).dist.shown and btn(2).dist.text == "12.4 yd", "shows 12.4 yd: " .. tostring(btn(2).dist.text))
 pos = { y = 100, x = 145, map = 1 }; tick()
 check(btn(2).dist.text == "45.0 yd" and btn(2).dist.color[1] > 0.9 + 0 - 0.0 , "45 yd, red when out of range")
 pos = nil; tick()
 check(not btn(2).dist.shown, "no distance shown when only the buff is known")
-TotemRangeDB.distanceMode = "off"
+ShamanKitDB.distanceMode = "off"
 
-SlashCmdList.TOTEMRANGE("unlock")
-check(TotemRangeDB.locked == false and bar().anyShown, "/totemrange unlock shows the frame")
+SlashCmdList.SHAMANKIT("unlock")
+check(ShamanKitDB.locked == false and bar().anyShown, "/totemrange unlock shows the frame")
 -- the exact bug from the field: left unlocked, real totems must still be tracked (not replaced by samples)
 fire("PLAYER_ENTERING_WORLD"); pos = { y = 5, x = 5, map = 1 }; fire("PLAYER_TOTEM_UPDATE", 2)
-pos = { y = 5, x = 80, map = 1 }; TotemRangeDB.distanceMode = "yards"; tick()
+pos = { y = 5, x = 80, map = 1 }; ShamanKitDB.distanceMode = "yards"; tick()
 check(btn(2).shown and not btn(1).shown and not btn(3).shown, "unlocked with a real totem out: only the real totem shows")
 check(btn(2).dist.text == "75.0 yd" and btn(2).mark.tex:find("NotReady"), "unlocked: real distance (75.0 yd) and red, not sample numbers")
-TotemRangeDB.distanceMode = "off"
+ShamanKitDB.distanceMode = "off"
 -- Totemic Recall while unlocked: every totem goes, nothing fake appears in its place
 local keep = totems
 totems = {}
 for slot = 1, 4 do fire("PLAYER_TOTEM_UPDATE", slot) end
 check(not btn(1).shown and not btn(2).shown and not btn(3).shown and not btn(4).shown, "Totemic Recall (unlocked): no icons at all, no placeholders")
 check(not bar().anyShown, "...and nothing else on screen: no drag box, bar hidden")
-SlashCmdList.TOTEMRANGE("lock")
+SlashCmdList.SHAMANKIT("lock")
 check(not bar().anyShown, "locked and no totems: nothing on screen")
-SlashCmdList.TOTEMRANGE("unlock")
+SlashCmdList.SHAMANKIT("unlock")
 totems = keep
 pos = { y = 5, x = 5, map = 1 }; fire("PLAYER_TOTEM_UPDATE", 2)
 check(btn(2).shown and bar().anyShown, "new totem: the real icon shows")
-SlashCmdList.TOTEMRANGE("lock")
-SlashCmdList.TOTEMRANGE("")
+SlashCmdList.SHAMANKIT("lock")
+SlashCmdList.SHAMANKIT("")
 check(savedCat.opened == 7, "/totemrange opens the settings")
-SlashCmdList.TOTEMRANGE("status")
+SlashCmdList.SHAMANKIT("status")
 
 -- ---- a totem that is out but whose event never reached us (the "nothing showed, then it came back" bug)
 do
@@ -433,7 +433,7 @@ do
 	rescan()
 	check(btn(3).shown and bar().anyShown, "missed event: the rescan shows the totem anyway")
 	local logged = false
-	for _, line in ipairs(TotemRangeDB.log or {}) do if line:find("RESCAN found slot 3") then logged = true end end
+	for _, line in ipairs(ShamanKitDB.log or {}) do if line:find("RESCAN found slot 3") then logged = true end end
 	check(logged, "...and logs that it caught a missed event")
 	-- it must not invent a position: with none recorded the mark is the unknown one, never a green "in range"
 	check(not btn(3).mark.tex:find("Ready") or btn(3).mark.tex:find("NotReady"), "...with unknown range, not a guessed green tick")
@@ -464,8 +464,8 @@ for _, mode in ipairs({ true, "all" }) do
 		fire("PLAYER_REGEN_DISABLED"); fire("PLAYER_REGEN_ENABLED")
 		fire("PLAYER_ENTERING_WORLD")
 		for _ = 1, 3 do tick() end
-		TotemRangeDB.distanceMode = "yards"; tick(); TotemRangeDB.distanceMode = "off"
-		SlashCmdList.TOTEMRANGE("status")
+		ShamanKitDB.distanceMode = "yards"; tick(); ShamanKitDB.distanceMode = "off"
+		SlashCmdList.SHAMANKIT("status")
 		if btn(1).scripts.OnEnter then btn(1).scripts.OnEnter(btn(1)) end
 	end)
 	check(ok, label .. ": nothing raises" .. (ok and "" or (" -> " .. tostring(err))))
@@ -480,7 +480,7 @@ do
 	local function near(a, b) return math.abs(a - b) < 0.03 end
 	totems = { [2] = { name = "Strength of Earth Totem II", start = t, dur = 300, icon = 8 } }   -- radius 30
 	secretMode = false; secretPos = false; inCombat = false
-	TotemRangeDB.distanceMode = nil; TotemRangeDB.vertical = false
+	ShamanKitDB.distanceMode = nil; ShamanKitDB.vertical = false
 	pos = { y = 0, x = 0, map = 1 }
 	fire("PLAYER_ENTERING_WORLD"); fire("PLAYER_TOTEM_UPDATE", 2); tick()
 	check(ns.distMode() == "bar", "the bar is the default (and what an unset value means)")
@@ -502,28 +502,28 @@ do
 	pos = { y = 0, x = 0, map = 1 }; tick()
 	check(g(2).shown, "...and it returns when the position does")
 	-- modes
-	TotemRangeDB.distanceMode = "yards"; ns.updatePreview(); pos = { y = 0, x = 12.4, map = 1 }; tick()
+	ShamanKitDB.distanceMode = "yards"; ns.updatePreview(); pos = { y = 0, x = 12.4, map = 1 }; tick()
 	check(not g(2).shown and btn(2).dist.shown and btn(2).dist.text == "12.4 yd", "yards mode: the number, no bar")
-	TotemRangeDB.distanceMode = "off"; ns.updatePreview(); tick()
+	ShamanKitDB.distanceMode = "off"; ns.updatePreview(); tick()
 	check(not g(2).shown and not btn(2).dist.shown, "off: neither")
-	TotemRangeDB.distanceMode = "bar"; ns.updatePreview(); tick()
+	ShamanKitDB.distanceMode = "bar"; ns.updatePreview(); tick()
 	check(g(2).shown and not btn(2).dist.shown, "back to the bar: bar only")
-	TotemRangeDB.distanceMode = "garbage"
+	ShamanKitDB.distanceMode = "garbage"
 	check(ns.distMode() == "bar", "a damaged setting means the bar")
-	TotemRangeDB.distanceMode = "bar"
+	ShamanKitDB.distanceMode = "bar"
 	-- layout direction and size
 	check(g(2).orientation == "HORIZONTAL", "horizontal bar: the range bar runs left to right under the icon")
-	TotemRangeDB.vertical = true; ns.apply(); tick()
+	ShamanKitDB.vertical = true; ns.apply(); tick()
 	check(g(2).orientation == "VERTICAL", "vertical bar: the range bar stands on the icon's right side")
-	TotemRangeDB.vertical = false; ns.apply()
+	ShamanKitDB.vertical = false; ns.apply()
 	-- the settings radio buttons
 	local radios = {}
-	for _, f in ipairs(frames) do if (f.value == "bar" or f.value == "yards" or f.value == "off") and f.scripts.OnClick then radios[f.value] = f end end
+	for _, f in ipairs(frames) do if (f.value == "bar" or f.value == "yards" or f.value == "off") and f.scripts.OnClick and f.parentFrame == savedCat.pages[2] then radios[f.value] = f end end
 	check(radios.bar and radios.yards and radios.off, "settings: three choices (range bar, exact yards, nothing)")
 	radios.yards.scripts.OnClick(radios.yards)
-	check(TotemRangeDB.distanceMode == "yards" and radios.yards.checked and not radios.bar.checked, "clicking 'Exact yards' selects it and unticks the others")
+	check(ShamanKitDB.distanceMode == "yards" and radios.yards.checked and not radios.bar.checked, "clicking 'Exact yards' selects it and unticks the others")
 	radios.off.scripts.OnClick(radios.off); radios.bar.scripts.OnClick(radios.bar)
-	check(TotemRangeDB.distanceMode == "bar" and radios.bar.checked and not radios.off.checked, "clicking 'Range bar' selects it")
+	check(ShamanKitDB.distanceMode == "bar" and radios.bar.checked and not radios.off.checked, "clicking 'Range bar' selects it")
 	-- the preview while the settings are open and nothing is out: four different fills so the look can be judged
 	totems = {}; fire("PLAYER_TOTEM_UPDATE", 2); ns.optionsOpen = true; ns.updatePreview()
 	check(near(g(1).value, 0.69) and near(g(2).value, 0.51) and g(3).value == 0 and near(g(4).value, 0.25),
@@ -531,7 +531,7 @@ do
 	check(g(3).edge.color[1] > 0.7, "preview: the out-of-range sample has the red frame")
 	ns.optionsOpen = false; ns.updatePreview()
 	check(not g(1).shown and not g(2).shown and not g(3).shown and not g(4).shown, "settings closed, no totems: no bars left behind")
-	TotemRangeDB.distanceMode = "off"
+	ShamanKitDB.distanceMode = "off"
 end
 
 -- ---- keeping a place open for an element: the gap (a dim placeholder) shows which totem is missing
@@ -541,25 +541,25 @@ do
 	check(#holders == 4, "one placeholder per element")
 	local function X(f) return f.anchor and f.anchor[4] end
 	local function Y(f) return f.anchor and f.anchor[5] end
-	local function hit(slot) return _G["TotemRangeHit" .. slot] end
-	local gap = TotemRangeDB.size + TotemRangeDB.spacing
+	local function hit(slot) return _G["ShamanKitHit" .. slot] end
+	local gap = ShamanKitDB.size + ShamanKitDB.spacing
 	local function out() totems = {}; for slot = 1, 4 do fire("PLAYER_TOTEM_UPDATE", slot) end end
 	local function put(slot, name) totems[slot] = { name = name, start = t, dur = 300, icon = 8 }; fire("PLAYER_TOTEM_UPDATE", slot) end
-	TotemRangeDB.order = { 2, 1, 3, 4 }; TotemRangeDB.vertical = false; TotemRangeDB.distanceMode = "off"
+	ShamanKitDB.order = { 2, 1, 3, 4 }; ShamanKitDB.vertical = false; ShamanKitDB.distanceMode = "off"
 	secretMode = false; secretPos = false; inCombat = false; pos = { y = 0, x = 0, map = 1 }
 	fire("PLAYER_ENTERING_WORLD"); out()
 
 	-- off by default: nothing changes
-	TotemRangeDB.reserve = nil; ns.fixReserve()
+	ShamanKitDB.reserve = nil; ns.fixReserve()
 	put(1, "Searing Totem III")
 	check(not holders[1].shown and not holders[2].shown and not holders[3].shown and not holders[4].shown, "default: no placeholders")
-	check(X(btn(1)) == 0 and bar().w == TotemRangeDB.size, "default: a lone totem sits first, the bar is one icon wide")
+	check(X(btn(1)) == 0 and bar().w == ShamanKitDB.size, "default: a lone totem sits first, the bar is one icon wide")
 
 	-- reserve earth and air, fire is out
-	TotemRangeDB.reserve = { [2] = true, [4] = true }; ns.apply()
+	ShamanKitDB.reserve = { [2] = true, [4] = true }; ns.apply()
 	check(holders[2].shown and holders[4].shown and not holders[1].shown and not holders[3].shown, "earth and air reserved: their placeholders show, fire and water's do not")
 	check(X(holders[2]) == 0 and X(btn(1)) == gap and X(holders[4]) == 2 * gap, "...earth first, fire in its place, air third (water takes no space)")
-	check(bar().w == 3 * TotemRangeDB.size + 2 * TotemRangeDB.spacing, "...the bar is three icons wide")
+	check(bar().w == 3 * ShamanKitDB.size + 2 * ShamanKitDB.spacing, "...the bar is three icons wide")
 	check(hit(1).mouse == true and hit(2).mouse == false and hit(4).mouse == false, "only the real totem is clickable, placeholders never block the mouse")
 
 	-- an earth totem comes down: it fills its place, the placeholder goes
@@ -583,20 +583,20 @@ do
 
 	-- all four reserved
 	out(); put(3, "Mana Spring Totem")
-	TotemRangeDB.reserve = { [1] = true, [2] = true, [3] = true, [4] = true }; ns.apply()
+	ShamanKitDB.reserve = { [1] = true, [2] = true, [3] = true, [4] = true }; ns.apply()
 	check(holders[2].shown and holders[1].shown and holders[4].shown and not holders[3].shown and X(btn(3)) == 2 * gap, "all four reserved: water out, the other three marked, nothing moves")
 
 	-- vertical keeps the same order down the bar
-	TotemRangeDB.vertical = true; ns.apply()
+	ShamanKitDB.vertical = true; ns.apply()
 	check(Y(holders[2]) == 0 and Y(holders[1]) == -gap and Y(btn(3)) == -2 * gap and Y(holders[4]) == -3 * gap, "vertical: the same places, top to bottom")
-	TotemRangeDB.vertical = false; ns.apply()
+	ShamanKitDB.vertical = false; ns.apply()
 
 	-- the settings preview: a reserved element shows its placeholder instead of a sample
-	out(); TotemRangeDB.reserve = { [3] = true }; ns.optionsOpen = true; ns.updatePreview()
+	out(); ShamanKitDB.reserve = { [3] = true }; ns.optionsOpen = true; ns.updatePreview()
 	check(holders[3].shown and not btn(3).shown and btn(1).shown and btn(2).shown and btn(4).shown, "settings preview: water reserved shows as an empty place, the others as samples")
-	TotemRangeDB.reserve = {}; ns.apply()
+	ShamanKitDB.reserve = {}; ns.apply()
 	check(not holders[3].shown and btn(3).shown, "...and unticking it brings the sample back")
-	TotemRangeDB.reserve = { [1] = true, [2] = true, [3] = true, [4] = true }; ns.apply()
+	ShamanKitDB.reserve = { [1] = true, [2] = true, [3] = true, [4] = true }; ns.apply()
 	check(holders[1].shown and holders[2].shown and holders[3].shown and holders[4].shown, "preview with everything reserved: four empty places")
 	ns.optionsOpen = false; ns.updatePreview()
 	check(not holders[1].shown and not holders[2].shown and not bar().anyShown, "settings closed, nothing out: no placeholders")
@@ -605,24 +605,24 @@ do
 	local boxes = {}
 	for _, f in ipairs(frames) do if f.rowIndex and f.kind == "CheckButton" and f.scripts.OnClick then boxes[ns.fixOrder()[f.rowIndex]] = f end end
 	check(boxes[1] and boxes[2] and boxes[3] and boxes[4], "settings: a box for each element")
-	TotemRangeDB.reserve = {}
+	ShamanKitDB.reserve = {}
 	boxes[3].checked = true; boxes[3].scripts.OnClick(boxes[3])
-	check(TotemRangeDB.reserve[3] == true and not TotemRangeDB.reserve[2], "ticking Water reserves water only")
+	check(ShamanKitDB.reserve[3] == true and not ShamanKitDB.reserve[2], "ticking Water reserves water only")
 	boxes[3].checked = false; boxes[3].scripts.OnClick(boxes[3])
-	check(TotemRangeDB.reserve[3] == nil, "unticking it clears it")
-	TotemRangeDB.reserve = { [2] = true }; savedCat.panel.OnRefresh()
+	check(ShamanKitDB.reserve[3] == nil, "unticking it clears it")
+	ShamanKitDB.reserve = { [2] = true }; savedCat.panel.OnRefresh()
 	check(boxes[2].checked == true and not boxes[1].checked, "the boxes show the saved state when the panel opens")
 	savedCat.panel.OnDefault()
-	check(next(TotemRangeDB.reserve) == nil, "Defaults clears them")
+	check(next(ShamanKitDB.reserve) == nil, "Defaults clears them")
 
 	-- damaged saved data
 	for label, bad in pairs({ ["a string"] = "x", ["yes/no text"] = { [2] = "yes", [3] = 0 }, ["a number"] = 7 }) do
-		TotemRangeDB.reserve = bad
+		ShamanKitDB.reserve = bad
 		fire("PLAYER_ENTERING_WORLD"); ns.fixReserve()
-		local r = TotemRangeDB.reserve
+		local r = ShamanKitDB.reserve
 		check(type(r) == "table" and r[2] == nil and r[3] == nil, "damaged reserve (" .. label .. ") is cleaned")
 	end
-	TotemRangeDB.reserve = {}; TotemRangeDB.distanceMode = "off"; ns.apply(); out()
+	ShamanKitDB.reserve = {}; ShamanKitDB.distanceMode = "off"; ns.apply(); out()
 end
 
 -- ---- removing totems one by one (right-click), the last one included, in and out of a fight
@@ -648,12 +648,12 @@ end
 
 -- ---- if the game ever does block something, it is written to the log with where it came from
 do
-	local function lastLog() local l = TotemRangeDB.log; return l[#l] end
+	local function lastLog() local l = ShamanKitDB.log; return l[#l] end
 	fire("ADDON_ACTION_BLOCKED", "SomeOtherAddon", "Frame:Hide()")
 	check(not (lastLog() or ""):find("ACTION_BLOCKED"), "a block caused by another addon is not logged as ours")
 	local before = #printedErrors
-	fire("ADDON_ACTION_BLOCKED", "TotemRange", "TotemRangeBar:Hide()")
-	check((lastLog() or ""):find("ADDON_ACTION_BLOCKED: TotemRangeBar:Hide()", 1, true), "our blocked action is logged with the function name")
+	fire("ADDON_ACTION_BLOCKED", "ShamanKit", "ShamanKitBar:Hide()")
+	check((lastLog() or ""):find("ADDON_ACTION_BLOCKED: ShamanKitBar:Hide()", 1, true), "our blocked action is logged with the function name")
 	check(#printedErrors == before, "...and logging it raises nothing")
 end
 
@@ -664,8 +664,8 @@ do
 	local TEX = function(id) return 100000 + id end
 	local function out() totems = {}; for slot = 1, 4 do fire("PLAYER_TOTEM_UPDATE", slot) end end
 	local function put(slot, name, icon) totems[slot] = { name = name, start = t, dur = 300, icon = icon }; fire("PLAYER_TOTEM_UPDATE", slot) end
-	TotemRangeDB.order = { 2, 1, 3, 4 }; TotemRangeDB.vertical = false; TotemRangeDB.distanceMode = "off"
-	TotemRangeDB.hold = nil; TotemRangeDB.rememberLast = true; TotemRangeDB.reserve = { [2] = true, [3] = true }
+	ShamanKitDB.order = { 2, 1, 3, 4 }; ShamanKitDB.vertical = false; ShamanKitDB.distanceMode = "off"
+	ShamanKitDB.hold = nil; ShamanKitDB.rememberLast = true; ShamanKitDB.reserve = { [2] = true, [3] = true }
 	secretMode = false; secretPos = false; inCombat = false; pos = { y = 0, x = 0, map = 1 }
 	fire("PLAYER_ENTERING_WORLD"); out(); ns.fixHold()
 	put(1, "Searing Totem III", 777)   -- keeps the bar up while the others come and go
@@ -673,33 +673,33 @@ do
 
 	-- remembers the last totem seen in that place
 	put(2, "Strength of Earth Totem II", 888); totems[2] = nil; fire("PLAYER_TOTEM_UPDATE", 2)
-	check(TotemRangeDB.hold.last[2] == 888 and holders[2].shown and holders[2].tex == 888, "an earth totem came and went: the placeholder is its icon")
+	check(ShamanKitDB.hold.last[2] == 888 and holders[2].shown and holders[2].tex == 888, "an earth totem came and went: the placeholder is its icon")
 	put(2, "Stoneskin Totem", 999); totems[2] = nil; fire("PLAYER_TOTEM_UPDATE", 2)
 	check(holders[2].tex == 999, "a different earth totem next time: the placeholder follows the newest one")
 	check(holders[3].tex == TEX(5394), "...water, never seen, stays generic")
 
 	-- remembering switched off
-	TotemRangeDB.rememberLast = false; ns.updatePreview()
+	ShamanKitDB.rememberLast = false; ns.updatePreview()
 	check(holders[2].tex == TEX(8071), "remembering off: back to the generic icon")
-	check(TotemRangeDB.hold.last[2] == 999, "...but it kept remembering underneath")
-	TotemRangeDB.rememberLast = true; ns.updatePreview()
+	check(ShamanKitDB.hold.last[2] == 999, "...but it kept remembering underneath")
+	ShamanKitDB.rememberLast = true; ns.updatePreview()
 	check(holders[2].tex == 999, "remembering on again: straight back to what it knew")
 
 	-- a locked choice beats the memory and survives new totems
-	TotemRangeDB.hold.choice[2] = 8075; ns.updatePreview()
+	ShamanKitDB.hold.choice[2] = 8075; ns.updatePreview()
 	check(holders[2].tex == TEX(8075), "locked to Strength of Earth: that icon, not the remembered one")
 	put(2, "Stoneskin Totem", 555); totems[2] = nil; fire("PLAYER_TOTEM_UPDATE", 2)
-	check(holders[2].tex == TEX(8075) and TotemRangeDB.hold.last[2] == 555, "...it stays locked while new totems are still remembered underneath")
-	TotemRangeDB.rememberLast = false; ns.updatePreview()
+	check(holders[2].tex == TEX(8075) and ShamanKitDB.hold.last[2] == 555, "...it stays locked while new totems are still remembered underneath")
+	ShamanKitDB.rememberLast = false; ns.updatePreview()
 	check(holders[2].tex == TEX(8075), "...and locking works with remembering off")
-	TotemRangeDB.hold.choice[2] = nil; TotemRangeDB.rememberLast = true; ns.updatePreview()
+	ShamanKitDB.hold.choice[2] = nil; ShamanKitDB.rememberLast = true; ns.updatePreview()
 	check(holders[2].tex == 555, "unlocked: the memory shows again")
-	TotemRangeDB.hold.choice[2] = 123456789   -- a totem this client does not know: texture lookup still answers in the mock, so use a real miss
+	ShamanKitDB.hold.choice[2] = 123456789   -- a totem this client does not know: texture lookup still answers in the mock, so use a real miss
 	local realTex = C_Spell.GetSpellTexture
 	C_Spell.GetSpellTexture = function(id) if id == 123456789 then return nil end return realTex(id) end
 	ns.updatePreview()
 	check(holders[2].tex == 555, "a locked totem with no icon in this client falls back to the memory instead of showing nothing")
-	C_Spell.GetSpellTexture = realTex; TotemRangeDB.hold.choice[2] = nil
+	C_Spell.GetSpellTexture = realTex; ShamanKitDB.hold.choice[2] = nil
 
 	-- in a fight the game hides the icon: the name taken from the cast stands in
 	out(); put(1, "Searing Totem III", 777)
@@ -708,13 +708,13 @@ do
 	totems[3] = { name = "Mana Spring Totem", start = t, dur = 300, icon = 4242 }
 	fire("PLAYER_TOTEM_UPDATE", 3); runTimers()
 	secretMode = false; inCombat = false
-	check(TotemRangeDB.hold.last[3] == TEX(5675), "icon hidden in combat: remembered by the name of the totem that was cast")
+	check(ShamanKitDB.hold.last[3] == TEX(5675), "icon hidden in combat: remembered by the name of the totem that was cast")
 	totems[3] = nil; fire("PLAYER_TOTEM_UPDATE", 3)
 	check(holders[3].tex == TEX(5675), "...and the placeholder shows it")
 
 	-- damaged saved data
 	for label, bad in pairs({ ["a string"] = "x", ["junk inside"] = { last = { [2] = {} , [3] = true }, choice = { [1] = "a", [2] = {} } }, ["a number"] = 5 }) do
-		TotemRangeDB.hold = bad
+		ShamanKitDB.hold = bad
 		local h = ns.fixHold()
 		check(type(h.last) == "table" and type(h.choice) == "table" and h.last[2] == nil and h.last[3] == nil and h.choice[1] == nil and h.choice[2] == nil,
 			"damaged icon memory (" .. label .. ") is cleaned")
@@ -732,7 +732,7 @@ do
 	check(table.concat(ids, ",") == "8177,10595,8512,15107,8835", "air choices: filtered the same way")
 
 	-- the picker buttons in the settings
-	TotemRangeDB.hold = nil; ns.fixHold(); TotemRangeDB.reserve = {}; TotemRangeDB.order = { 2, 1, 3, 4 }; savedCat.panel.OnRefresh()
+	ShamanKitDB.hold = nil; ns.fixHold(); ShamanKitDB.reserve = {}; ShamanKitDB.order = { 2, 1, 3, 4 }; savedCat.panel.OnRefresh()
 	local pick, keep = {}, {}
 	for _, f in ipairs(frames) do
 		if f.rowIndex and f.kind == "Button" and f.scripts.OnClick then pick[f.rowIndex] = f end
@@ -740,33 +740,33 @@ do
 	end
 	check(pick[1] and pick[4] and pick[1].text == "Auto", "settings: a picker per row, starting on Auto")
 	pick[1].scripts.OnClick(pick[1], "LeftButton")
-	check(TotemRangeDB.hold.choice[2] == 5730 and pick[1].text == "Stoneclaw", "left-click: the first earth totem, shown without the word Totem")
+	check(ShamanKitDB.hold.choice[2] == 5730 and pick[1].text == "Stoneclaw", "left-click: the first earth totem, shown without the word Totem")
 	pick[1].scripts.OnClick(pick[1], "LeftButton"); pick[1].scripts.OnClick(pick[1], "LeftButton")
-	check(TotemRangeDB.hold.choice[2] == 2484, "left-click again twice: third earth totem")
+	check(ShamanKitDB.hold.choice[2] == 2484, "left-click again twice: third earth totem")
 	pick[1].scripts.OnClick(pick[1], "RightButton")
-	check(TotemRangeDB.hold.choice[2] == 8071, "right-click goes back one")
+	check(ShamanKitDB.hold.choice[2] == 8071, "right-click goes back one")
 	for _ = 1, 4 do pick[1].scripts.OnClick(pick[1], "LeftButton") end
-	check(TotemRangeDB.hold.choice[2] == nil and pick[1].text == "Auto", "past the last totem it wraps round to Auto")
+	check(ShamanKitDB.hold.choice[2] == nil and pick[1].text == "Auto", "past the last totem it wraps round to Auto")
 	pick[1].scripts.OnClick(pick[1], "RightButton")
-	check(TotemRangeDB.hold.choice[2] == 8143, "right-click from Auto goes to the last totem")
+	check(ShamanKitDB.hold.choice[2] == 8143, "right-click from Auto goes to the last totem")
 	-- a row follows the element it shows, so reordering moves the pickers with it
-	TotemRangeDB.hold.choice = {}; ns.moveSlot(1, 1); savedCat.panel.OnRefresh()
+	ShamanKitDB.hold.choice = {}; ns.moveSlot(1, 1); savedCat.panel.OnRefresh()
 	pick[1].scripts.OnClick(pick[1], "LeftButton")
-	check(TotemRangeDB.hold.choice[1] == 3599 and not TotemRangeDB.hold.choice[2], "after moving fire to the top, the first row picks fire totems")
+	check(ShamanKitDB.hold.choice[1] == 3599 and not ShamanKitDB.hold.choice[2], "after moving fire to the top, the first row picks fire totems")
 	ns.resetOrder()
 	-- the keep-a-space box on a row, and the remember box
 	savedCat.panel.OnRefresh()
 	keep[2].checked = true; keep[2].scripts.OnClick(keep[2])
-	check(TotemRangeDB.reserve[1] == true and not TotemRangeDB.reserve[2], "the Keep box on the second row (fire) reserves fire")
+	check(ShamanKitDB.reserve[1] == true and not ShamanKitDB.reserve[2], "the Keep box on the second row (fire) reserves fire")
 	local remBox
 	for _, f in ipairs(frames) do if f.settingKey == "rememberLast" then remBox = f end end
 	remBox.checked = false; remBox.scripts.OnClick(remBox)
-	check(TotemRangeDB.rememberLast == false, "the 'last totem used' box switches remembering off")
+	check(ShamanKitDB.rememberLast == false, "the 'last totem used' box switches remembering off")
 	remBox.checked = true; remBox.scripts.OnClick(remBox)
-	check(TotemRangeDB.rememberLast == true, "...and on")
-	TotemRangeDB.hold.choice[2] = 5730; savedCat.panel.OnDefault()
-	check(next(TotemRangeDB.hold.choice) == nil and next(TotemRangeDB.reserve) == nil and TotemRangeDB.rememberLast == true, "Defaults clears locked totems and reserved spaces, remembering back on")
-	TotemRangeDB.reserve = {}; TotemRangeDB.hold = nil; ns.fixHold(); out()
+	check(ShamanKitDB.rememberLast == true, "...and on")
+	ShamanKitDB.hold.choice[2] = 5730; savedCat.panel.OnDefault()
+	check(next(ShamanKitDB.hold.choice) == nil and next(ShamanKitDB.reserve) == nil and ShamanKitDB.rememberLast == true, "Defaults clears locked totems and reserved spaces, remembering back on")
+	ShamanKitDB.reserve = {}; ShamanKitDB.hold = nil; ns.fixHold(); out()
 end
 
 -- ---- a failure in the bookkeeping (memory of icons, placeholders) must never stop a totem from showing, least of all mid-fight
@@ -774,10 +774,10 @@ do
 	local function out() totems = {}; for slot = 1, 4 do fire("PLAYER_TOTEM_UPDATE", slot) end end
 	local function errorsInLog(what)
 		local n = 0
-		for _, l in ipairs(TotemRangeDB.log or {}) do if l:find("ERROR in " .. what, 1, true) then n = n + 1 end end
+		for _, l in ipairs(ShamanKitDB.log or {}) do if l:find("ERROR in " .. what, 1, true) then n = n + 1 end end
 		return n
 	end
-	TotemRangeDB.hold = nil; TotemRangeDB.reserve = { [1] = true, [4] = true }; TotemRangeDB.distanceMode = "bar"
+	ShamanKitDB.hold = nil; ShamanKitDB.reserve = { [1] = true, [4] = true }; ShamanKitDB.distanceMode = "bar"
 	secretPos = false; pos = { y = 0, x = 0, map = 1 }; inCombat = false; secretMode = false
 	fire("PLAYER_ENTERING_WORLD"); out(); ns.fixHold()
 	local realPrinted = #printedErrors
@@ -792,7 +792,7 @@ do
 
 	-- the memory code breaking must not matter
 	out(); secretMode = false; inCombat = false
-	TotemRangeDB.hold = setmetatable({}, { __index = function() error("boom (test)") end })
+	ShamanKitDB.hold = setmetatable({}, { __index = function() error("boom (test)") end })
 	secretMode = true; inCombat = true
 	fire("UNIT_SPELLCAST_SUCCEEDED", "player", "g", 5675)
 	totems[3] = { name = "Mana Spring Totem", start = t, dur = 300, icon = 4242 }
@@ -806,7 +806,7 @@ do
 	fire("PLAYER_TOTEM_UPDATE", 2)
 	check(btn(2).shown and btn(3).shown, "...and so does the next totem")
 	secretMode = false; inCombat = false
-	TotemRangeDB.hold = nil; ns.fixHold(); TotemRangeDB.reserve = {}; out()
+	ShamanKitDB.hold = nil; ns.fixHold(); ShamanKitDB.reserve = {}; out()
 	while #printedErrors > realPrinted do table.remove(printedErrors) end   -- these errors were on purpose
 end
 
@@ -829,48 +829,48 @@ do
 		for _, e in ipairs(list) do out[#out + 1] = e[1] end
 		return table.concat(out, ",")
 	end
-	local gap = TotemRangeDB.size + TotemRangeDB.spacing
-	TotemRangeDB.order = nil; ns.fixOrder()
-	check(table.concat(TotemRangeDB.order, ",") == "2,1,3,4", "default order is earth, fire, water, air (slots 2,1,3,4)")
-	TotemRangeDB.vertical = false
+	local gap = ShamanKitDB.size + ShamanKitDB.spacing
+	ShamanKitDB.order = nil; ns.fixOrder()
+	check(table.concat(ShamanKitDB.order, ",") == "2,1,3,4", "default order is earth, fire, water, air (slots 2,1,3,4)")
+	ShamanKitDB.vertical = false
 	placeAll()
 	check(sequence() == "2,1,3,4" and xOf(2) == 0 and xOf(1) == gap and xOf(3) == 2 * gap and xOf(4) == 3 * gap,
 		"all four out: earth, fire, water, air, left to right with the right spacing")
 	totems[3] = nil; fire("PLAYER_TOTEM_UPDATE", 3)
 	check(sequence() == "2,1,4" and xOf(4) == 2 * gap, "no water totem: the others close the gap but keep their order")
 	local n = 0
-	local before = table.concat(TotemRangeDB.order, ",")
-	check(ns.moveSlot(1, -1) == false and ns.moveSlot(4, 1) == false and table.concat(TotemRangeDB.order, ",") == before,
+	local before = table.concat(ShamanKitDB.order, ",")
+	check(ns.moveSlot(1, -1) == false and ns.moveSlot(4, 1) == false and table.concat(ShamanKitDB.order, ",") == before,
 		"moving the first one up / the last one down does nothing")
-	check(ns.moveSlot(1, 1) == true and table.concat(TotemRangeDB.order, ",") == "1,2,3,4", "move earth down one: fire, earth, water, air")
+	check(ns.moveSlot(1, 1) == true and table.concat(ShamanKitDB.order, ",") == "1,2,3,4", "move earth down one: fire, earth, water, air")
 	check(sequence() == "1,2,4", "...and the bar follows at once")
-	check(ns.moveSlot(4, -1) == true and table.concat(TotemRangeDB.order, ",") == "1,2,4,3" and sequence() == "1,2,4", "move air up: fire, earth, air, water")
+	check(ns.moveSlot(4, -1) == true and table.concat(ShamanKitDB.order, ",") == "1,2,4,3" and sequence() == "1,2,4", "move air up: fire, earth, air, water")
 	-- the real Up / Down buttons in the settings panel
 	local down
 	for _, f in ipairs(frames) do if f.orderRow == 1 and f.orderDelta == 1 and f.scripts.OnClick then down = f break end end
 	check(down ~= nil, "settings panel has Up / Down buttons")
-	TotemRangeDB.order = { 2, 1, 3, 4 }
+	ShamanKitDB.order = { 2, 1, 3, 4 }
 	down.scripts.OnClick(down)    -- the first Down button: earth <-> fire
-	check(table.concat(TotemRangeDB.order, ",") == "1,2,3,4", "the first Down button swaps the first two")
+	check(table.concat(ShamanKitDB.order, ",") == "1,2,3,4", "the first Down button swaps the first two")
 	local reset
 	for _, f in ipairs(frames) do if f.text == "Reset order" and f.scripts.OnClick then reset = f break end end
 	reset.scripts.OnClick(reset)
-	check(table.concat(TotemRangeDB.order, ",") == "2,1,3,4" and sequence() == "2,1,4", "Reset order restores earth, fire, water, air")
+	check(table.concat(ShamanKitDB.order, ",") == "2,1,3,4" and sequence() == "2,1,4", "Reset order restores earth, fire, water, air")
 	-- damaged saved data
 	for label, bad in pairs({ ["duplicate"] = { 1, 1, 2, 3 }, ["too short"] = { 1, 2, 3 }, ["not a table"] = "x",
 		["out of range"] = { 1, 2, 3, 9 }, ["fraction"] = { 1, 2, 3, 3.5 }, ["empty"] = {} }) do
-		TotemRangeDB.order = bad
+		ShamanKitDB.order = bad
 		fire("PLAYER_ENTERING_WORLD"); ns.fixOrder()
-		check(table.concat(TotemRangeDB.order, ",") == "2,1,3,4", "damaged order (" .. label .. ") falls back to the default")
+		check(table.concat(ShamanKitDB.order, ",") == "2,1,3,4", "damaged order (" .. label .. ") falls back to the default")
 	end
-	TotemRangeDB.order = { 2, 1, 3, 4 }
+	ShamanKitDB.order = { 2, 1, 3, 4 }
 	-- vertical keeps the same order
-	TotemRangeDB.vertical = true; ns.apply(); placeAll()
+	ShamanKitDB.vertical = true; ns.apply(); placeAll()
 	local list = {}
 	for slot = 1, 4 do list[#list + 1] = { slot, btn(slot).anchor[5] } end
 	table.sort(list, function(a, b) return a[2] > b[2] end)
 	check(list[1][1] == 2 and list[2][1] == 1 and list[3][1] == 3 and list[4][1] == 4, "vertical bar: earth on top, then fire, water, air")
-	TotemRangeDB.vertical = false; ns.apply()
+	ShamanKitDB.vertical = false; ns.apply()
 	totems = {}; for slot = 1, 4 do fire("PLAYER_TOTEM_UPDATE", slot) end
 end
 
@@ -881,7 +881,7 @@ do
 		[3] = { name = "Mana Spring Totem", start = t, dur = 300, icon = 9 }, [4] = { name = "Windfury Totem", start = t, dur = 300, icon = 10 } }
 	secretMode = false; secretPos = false; inCombat = false; mapOn = true
 	pos = { y = 0, x = 0, map = 1 }
-	TotemRangeDB.distanceMode = "bar"; TotemRangeDB.showRange = true; TotemRangeDB.showOut = true
+	ShamanKitDB.distanceMode = "bar"; ShamanKitDB.showRange = true; ShamanKitDB.showOut = true
 	fire("PLAYER_ENTERING_WORLD"); for slot = 1, 4 do fire("PLAYER_TOTEM_UPDATE", slot) end
 	for _ = 1, 20 do tick() end
 	local counts = { UnitPosition = 0, GetTotemInfo = 0, GetPlayerMapPosition = 0 }
@@ -907,7 +907,7 @@ do
 		kb, per(counts.UnitPosition), per(counts.GetPlayerMapPosition), per(counts.GetTotemInfo), per(CALLS.SetTexture), per(CALLS.SetVertexColor), per(CALLS.SetText), per(CALLS.SetTextColor)))
 	COST = { kb = kb, up = per(counts.UnitPosition), map = per(counts.GetPlayerMapPosition), info = per(counts.GetTotemInfo),
 		tex = per(CALLS.SetTexture), col = per(CALLS.SetVertexColor), txt = per(CALLS.SetText) }
-	TotemRangeDB.distanceMode = "off"
+	ShamanKitDB.distanceMode = "off"
 	check(COST.kb < 2, ("cost: under 2 KB of garbage per tick (was 4.2): %.2f"):format(COST.kb))
 	check(COST.up <= 1.01 and COST.map < 0.1, ("cost: one position read per tick, map only when a range edge is crossed (%.3f)"):format(COST.map))
 	check(COST.info <= 4.01, "cost: one GetTotemInfo per totem per tick (was two)")
@@ -932,12 +932,12 @@ end
 
 -- ---- weapon enchant + Lightning Shield icons
 do
-	local db = TotemRangeDB
-	local function W() return _G.TotemRangeWeapon end
-	local function S() return _G.TotemRangeShield end
-	local aux = _G.TotemRangeIndicators
+	local db = ShamanKitDB
+	local function W() return _G.ShamanKitWeapon end
+	local function S() return _G.ShamanKitShield end
+	local aux = _G.ShamanKitIndicators
 	local function second() ev.scripts.OnUpdate(ev, 1.0) end      -- the once-a-second look
-	TotemRangeDB.log = {}                                         -- earlier sections log deliberate errors; start clean
+	ShamanKitDB.log = {}                                         -- earlier sections log deliberate errors; start clean
 
 	totems = {}; inCombat = false; secretMode = false; secretPos = false; mapOn = true
 	auras = {}
@@ -949,7 +949,7 @@ do
 		GetItemInfoInstant = function(id) return id, "Weapon", "Two-Handed Maces", "INVTYPE_2HWEAPON", 1, itemClass, itemSub end,
 		GetWeaponEnchantInfo = function() enchantCalls = enchantCalls + 1; if enchantSecret then return secret() end return enchants end,
 	}
-	db.weaponOn, db.shieldOn, db.auxAttached, db.vertical, db.lastImbue = true, true, true, false, nil
+	db.weaponOn, db.shieldOn, db.auxAnchor, db.vertical, db.lastImbue = true, true, "bar", false, nil
 	db.size, db.spacing = 36, 4
 	ns.optionsOpen = false
 	fire("PLAYER_ENTERING_WORLD")
@@ -1098,7 +1098,7 @@ do
 	check(aux.anchor[1] == "TOPRIGHT" and aux.anchor[2] == bar() and aux.anchor[3] == "TOPLEFT", "place: vertical bar -> to the left of it")
 	check(W().anchor[5] ~= 0 or S().anchor[5] ~= 0, "place: vertical bar -> the two icons stack")
 	db.vertical = false; ns.apply()
-	db.auxAttached = false; ns.updatePreview()
+	db.auxAnchor = "free"; ns.updatePreview()
 	check(aux.anchor[2] == UIParent, "place: not attached -> its own place on the screen")
 	local moved = false
 	rawset(aux, "StartMoving", function() moved = true end)
@@ -1108,12 +1108,12 @@ do
 	check(moved, "drag: unlocked and not attached -> moves")
 	W().scripts.OnDragStop(W())
 	check(db.auxX == 10 and db.auxY == 20 and db.auxPoint == "CENTER", "drag: the new place is saved")
-	moved = false; db.auxAttached = true; ns.updatePreview(); W().scripts.OnDragStart(W())
+	moved = false; db.auxAnchor = "bar"; ns.updatePreview(); W().scripts.OnDragStart(W())
 	check(not moved, "drag: attached -> the icons never move on their own")
 	db.locked = true
-	db.auxAttached = false; ns.resetPosition()
+	db.auxAnchor = "free"; ns.resetPosition()
 	check(db.auxX == 0 and db.auxY == -260, "reset position also puts the icons back")
-	db.auxAttached = true; ns.updatePreview()
+	db.auxAnchor = "bar"; ns.updatePreview()
 
 	-- combat: only shown / hidden; placement and size wait for the fight to end
 	enchants = { { hasEnchant = true, timeLeft = 1800000 } }; auras["Lightning Shield"] = nil
@@ -1128,15 +1128,15 @@ do
 	check(S().count.text == "1", "combat: the charge count follows")
 	db.size = 50; db.vertical = true; ns.apply(); ns.updatePreview()
 	check(S().w == sizeBefore and aux.anchor[1] == "TOPLEFT", "combat: a size / layout change waits (no resize, no re-anchor)")
-	db.locked = false; db.auxAttached = false; ns.updatePreview()
+	db.locked = false; db.auxAnchor = "free"; ns.updatePreview()
 	check(aux.anchor[2] == bar(), "combat: un-attaching waits too")
 	db.locked = true
 	inCombat = false; fire("PLAYER_REGEN_ENABLED")
 	check(S().w == 38 and aux.anchor[1] == "CENTER" and aux.anchor[2] == UIParent, ("combat over: the waiting changes are applied (size 38, own place) w=%s a1=%s"):format(tostring(S().w), tostring(aux.anchor[1])))
-	db.size = 36; db.vertical = false; db.auxAttached = true; ns.updatePreview()
+	db.size = 36; db.vertical = false; db.auxAnchor = "bar"; ns.updatePreview()
 	-- the whole fight touched no protected frame
 	local blocked
-	for _, l in ipairs(TotemRangeDB.log or {}) do if l:find("ACTION_BLOCKED") or l:find("ERROR") then blocked = l end end
+	for _, l in ipairs(ShamanKitDB.log or {}) do if l:find("ACTION_BLOCKED") or l:find("ERROR") then blocked = l end end
 	check(blocked == nil, "icons: no error and no blocked action in the log" .. (blocked and (" -> " .. blocked) or ""))
 	enchants = { { hasEnchant = true, timeLeft = 1800000 } }; auras["Lightning Shield"] = nil
 	second(); fire("UNIT_AURA", "player")
@@ -1144,7 +1144,7 @@ do
 
 	-- ---- placement: side of the bar, alignment, nudges, size, warning time
 	do
-		db.distanceMode = "off"; db.auxAttached = true; db.vertical = false; db.size, db.spacing = 36, 4
+		db.distanceMode = "off"; db.auxAnchor = "bar"; db.vertical = false; db.size, db.spacing = 36, 4
 		db.auxSide, db.auxAlign, db.auxOffX, db.auxOffY, db.auxScale = "auto", "start", 0, 0, 75
 		local function at(point, rel, relPoint, x, y, msg)
 			ns.updatePreview()
@@ -1201,65 +1201,158 @@ do
 
 		-- unlocked and on its own: the samples are there to grab, without opening the settings
 		enchants = { { hasEnchant = true, timeLeft = 1800000 } }; auras["Lightning Shield"] = nil; fire("UNIT_AURA", "player"); second()
-		db.locked = true; db.auxAttached = false; ns.optionsOpen = false; ns.updatePreview()
+		db.locked = true; db.auxAnchor = "free"; ns.optionsOpen = false; ns.updatePreview()
 		check(not W().shown and not S().shown, "locked and detached: nothing to see when all is well")
 		db.locked = false; ns.updatePreview()
 		check(W().shown and S().shown, "unlocked and detached: sample icons to drag, settings closed")
 		auras["Lightning Shield"] = { applications = 2 }; fire("UNIT_AURA", "player")
 		check(S().count.text == "2", "unlocked and detached: the real shield wins over the sample")
 		auras["Lightning Shield"] = nil; fire("UNIT_AURA", "player")
-		db.auxAttached = true; ns.updatePreview()
+		db.auxAnchor = "bar"; ns.updatePreview()
 		check(not W().shown and not S().shown, "unlocked but attached: no samples (the bar is what you drag)")
 		db.locked = true; ns.updatePreview()
-		db.auxAttached = true
+		db.auxAnchor = "bar"
+	end
+
+	-- ---- attached to the player frame
+	do
+		local function at(point, rel, relPoint, x, y, msg)
+			ns.updatePreview()
+			local a = aux.anchor
+			check(a[1] == point and a[2] == rel and a[3] == relPoint and a[4] == x and a[5] == y,
+				("%s (%s %s %s %s %s)"):format(msg, tostring(a[1]), a[2] == PlayerFrame and "player" or (a[2] == bar() and "bar" or "?"), tostring(a[3]), tostring(a[4]), tostring(a[5])))
+		end
+		db.distanceMode = "bar"; db.vertical = false; db.attach = false; db.locked = true
+		db.auxSide, db.auxAlign, db.auxOffX, db.auxOffY = "auto", "start", 0, 0
+		db.auxAnchor = "player"
+		at("TOPLEFT", PlayerFrame, "BOTTOMLEFT", 0, -6, "player frame, side auto: below it (the totem bar's range bars are not in the way here)")
+		db.auxSide = "top";    at("BOTTOMLEFT", PlayerFrame, "TOPLEFT", 0, 6, "player frame, above")
+		db.auxSide = "left";   at("TOPRIGHT", PlayerFrame, "TOPLEFT", -6, 0, "player frame, left")
+		db.auxSide = "right";  at("TOPLEFT", PlayerFrame, "TOPRIGHT", 6, 0, "player frame, right: next to it, no 'after all four places' (there are no totems there)")
+		db.auxSide, db.auxAlign = "bottom", "end"; at("TOPRIGHT", PlayerFrame, "BOTTOMRIGHT", 0, -6, "player frame, below, end")
+		db.auxAlign = "center"; at("TOP", PlayerFrame, "BOTTOM", 0, -6, "player frame, below, middle")
+		db.auxAlign, db.auxOffX, db.auxOffY = "start", 4, 5; at("TOPLEFT", PlayerFrame, "BOTTOMLEFT", 4, -1, "player frame: the nudge is added")
+		db.auxOffX, db.auxOffY = 0, 0
+		db.vertical = true; db.auxSide = "auto"
+		at("TOPLEFT", PlayerFrame, "BOTTOMLEFT", 0, -6, "player frame: a vertical totem bar changes nothing")
+		db.vertical = false
+		-- when the totem bar sits under the player frame, auto keeps clear of it
+		db.attach = true; ns.updatePreview()
+		at("BOTTOMLEFT", PlayerFrame, "TOPLEFT", 0, 6, "player frame + the bar attached to it: auto goes above")
+		db.auxSide = "bottom"; at("TOPLEFT", PlayerFrame, "BOTTOMLEFT", 0, -6, "player frame + bar attached: an explicit 'Below' is still obeyed")
+		db.attach = false; db.auxSide = "auto"; ns.updatePreview()
+		-- the icons' own order and direction work here too
+		db.auxSide = "left"; ns.updatePreview()
+		check(W().anchor[5] < 0 and S().anchor[5] == 0, "player frame, left: the two icons stack")
+		db.auxSide = "auto"; ns.updatePreview()
+		-- no player frame (another UI replaced it): fall back to the totem bar, never an error
+		local saved = PlayerFrame
+		PlayerFrame = nil; ns.updatePreview()
+		check(ns.auxMode() == "bar" and aux.anchor[2] == bar(), "no player frame: the icons use the totem bar")
+		PlayerFrame = saved; ns.updatePreview()
+		check(ns.auxMode() == "player" and aux.anchor[2] == PlayerFrame, "player frame back: the icons go back to it")
+		-- dragging and samples belong to 'own place' only
+		local moved = false
+		rawset(aux, "StartMoving", function() moved = true end)
+		db.locked = false; ns.updatePreview(); W().scripts.OnDragStart(W())
+		check(not moved, "player frame: the icons are not draggable")
+		enchants = { { hasEnchant = true, timeLeft = 1800000 } }; auras["Lightning Shield"] = nil; second()
+		check(not W().shown and not S().shown, "player frame, unlocked: no sample icons (they are only for 'own place')")
+		db.locked = true
+		-- in a fight the move waits
+		db.auxAnchor = "bar"; ns.updatePreview()
+		inCombat = true; fire("PLAYER_REGEN_DISABLED")
+		db.auxAnchor = "player"; ns.updatePreview()
+		check(aux.anchor[2] == bar(), "player frame chosen in a fight: it waits")
+		inCombat = false; fire("PLAYER_REGEN_ENABLED")
+		check(aux.anchor[2] == PlayerFrame, "player frame: applied when the fight ends")
+		db.auxAnchor = "bar"; db.distanceMode = "off"; ns.updatePreview()
+	end
+
+	-- ---- settings from older versions
+	do
+		local function mig(t) ns.migrate(t); return t end
+		local t = mig({ auxAttached = false }); check(t.auxAnchor == "free" and t.auxAttached == nil, "migrate: 'not attached' (0.8) -> own place")
+		t = mig({ auxAttached = true }); check(t.auxAnchor == "bar" and t.auxAttached == nil, "migrate: 'attached' (0.8) -> the totem bar")
+		t = mig({}); check(t.auxAnchor == "bar", "migrate: nothing saved -> the totem bar")
+		t = mig({ auxAnchor = "player", auxAttached = false }); check(t.auxAnchor == "player" and t.auxAttached == nil, "migrate: a choice already made is kept")
+		t = mig({ showRange = false }); check(t.showOut == false, "migrate: the old single range switch hid both marks")
+		t = mig({ showRange = false, showOut = true }); check(t.showOut == true, "migrate: an explicit cross setting is kept")
+		check(ns.defaults.auxAttached == nil and ns.defaults.auxAnchor == "bar", "defaults: auxAnchor replaces auxAttached")
 	end
 
 	-- ---- the settings pages
 	do
 		local pages = savedCat.pages
-		local function frameWith(page, pred) for _, f in ipairs(frames) do if pred(f) then return f end end end
-		check(pages[1].name == "TotemRange" and pages[2].name == "Totems" and pages[3].name == "Small icons", "pages: TotemRange, Totems, Small icons")
-		check(allCats[2].parent == allCats[1] and allCats[3].parent == allCats[1], "pages: the two others are sub-pages of the main one")
+		local function frameWith(pred) for _, f in ipairs(frames) do if pred(f) and (f.parentFrame == nil or f.kind ~= "CheckButton" or f.parentFrame == pages[4]) then return f end end end
+		check(pages[1].name == "ShamanKit" and pages[2].name == "Totem bar" and pages[3].name == "Totems" and pages[4].name == "Buffs",
+			"pages: ShamanKit (home), Totem bar, Totems, Buffs")
+		check(allCats[2].parent == allCats[1] and allCats[3].parent == allCats[1] and allCats[4].parent == allCats[1], "pages: the three others are sub-pages of the home page")
+		check(allCats[1].name == "ShamanKit", "pages: the category is called ShamanKit")
+		-- the home page has a button to each page
+		local function homeButton(label)
+			return frameWith(function(f) return f.kind == "Button" and f.text == label and f.scripts.OnClick end)
+		end
+		for i, label in ipairs({ "Totem bar", "Totems", "Buffs" }) do
+			local btn = homeButton(label)
+			check(btn ~= nil, "home: a button for " .. label)
+			if btn then btn.scripts.OnClick(btn); check(savedCat.opened == allCats[i + 1].GetID(), "home: the " .. label .. " button opens that page") end
+		end
 		-- the preview follows the pages: two pages swapped in one go keep it on
-		pages[1].scripts.OnShow(); check(ns.optionsOpen, "pages: opening one turns the samples on")
-		pages[3].scripts.OnShow(); pages[1].scripts.OnHide()
+		pages[2].scripts.OnShow(); check(ns.optionsOpen, "pages: opening one turns the samples on")
+		pages[4].scripts.OnShow(); pages[2].scripts.OnHide()
 		check(ns.optionsOpen, "pages: one page hiding while another shows keeps the samples on")
-		pages[3].scripts.OnHide(); check(not ns.optionsOpen, "pages: the last one closing turns them off")
+		pages[4].scripts.OnHide(); check(not ns.optionsOpen, "pages: the last one closing turns them off")
 		-- choosing a side in the page
-		local top = frameWith(pages[3], function(f) return f.value == "top" and f.scripts.OnClick end)
-		check(top ~= nil, "pages: the small-icons page has a 'Above' choice")
+		local top = frameWith(function(f) return f.value == "top" and f.scripts.OnClick end)
+		check(top ~= nil, "pages: the buffs page has an 'Above' choice")
 		top.scripts.OnClick(top)
 		check(db.auxSide == "top" and top.checked, "pages: clicking 'Above' selects it")
 		check(aux.anchor[1] == "BOTTOMLEFT" and aux.anchor[3] == "TOPLEFT", "pages: and the icons move above the bar")
-		local mid = frameWith(pages[3], function(f) return f.value == "center" and f.scripts.OnClick end)
+		local mid = frameWith(function(f) return f.value == "center" and f.scripts.OnClick end)
 		mid.scripts.OnClick(mid); check(db.auxAlign == "center", "pages: clicking 'Middle' lines them up in the middle")
+		-- attach to: the three choices
+		local toPlayer = frameWith(function(f) return f.value == "player" and f.scripts.OnClick end)
+		local toFree = frameWith(function(f) return f.value == "free" and f.scripts.OnClick end)
+		local toBar = frameWith(function(f) return f.value == "bar" and f.scripts.OnClick end)
+		check(toPlayer and toFree and toBar, "pages: attach to the totem bar, the player frame or an own place")
+		toPlayer.scripts.OnClick(toPlayer)
+		check(db.auxAnchor == "player" and toPlayer.checked and not toBar.checked and aux.anchor[2] == PlayerFrame, "pages: 'Player frame' moves the icons onto the player frame")
+		toFree.scripts.OnClick(toFree)
+		check(db.auxAnchor == "free" and aux.anchor[2] == UIParent, "pages: 'Own place' frees them")
+		toBar.scripts.OnClick(toBar)
+		check(db.auxAnchor == "bar" and aux.anchor[2] == bar(), "pages: 'Totem bar' puts them back")
 		-- each page resets only its own settings
 		db.auxScale, db.auxWarnMin, db.weaponOn, db.size, db.rememberLast = 100, 5, false, 60, false
-		pages[3].OnDefault()
-		check(db.auxScale == 75 and db.auxWarnMin == 2 and db.weaponOn == true and db.auxSide == "auto" and db.auxAlign == "start",
-			"defaults on the icons page: its settings, and the side / alignment, go back")
-		check(db.size == 60 and db.rememberLast == false, "defaults on the icons page: nothing on the other pages changed")
-		pages[2].OnDefault(); check(db.rememberLast == true and db.size == 60, "defaults on the totems page: only its own")
-		pages[1].OnDefault(); check(db.size == 36, "defaults on the main page: its own")
+		pages[4].OnDefault()
+		check(db.auxScale == 75 and db.auxWarnMin == 2 and db.weaponOn == true and db.auxSide == "auto" and db.auxAlign == "start" and db.auxAnchor == "bar",
+			"defaults on the buffs page: its settings, and the side / alignment, go back")
+		check(db.size == 60 and db.rememberLast == false, "defaults on the buffs page: nothing on the other pages changed")
+		pages[3].OnDefault(); check(db.rememberLast == true and db.size == 60, "defaults on the totems page: only its own")
+		pages[2].OnDefault(); check(db.size == 36, "defaults on the totem bar page: its own")
 		db.locked = true
-		-- /totemrange icons
-		SlashCmdList.TOTEMRANGE("icons"); check(savedCat.opened == allCats[3].GetID(), "/totemrange icons opens the small-icons page")
-		SlashCmdList.TOTEMRANGE("totems"); check(savedCat.opened == allCats[2].GetID(), "/totemrange totems opens the totems page")
-		SlashCmdList.TOTEMRANGE(""); check(savedCat.opened == 7, "/totemrange opens the main page")
-		-- a client without sub-pages gets three categories side by side
+		-- /shamankit <page>
+		SlashCmdList.SHAMANKIT("buffs"); check(savedCat.opened == allCats[4].GetID(), "/shamankit buffs opens the buffs page")
+		SlashCmdList.SHAMANKIT("icons"); check(savedCat.opened == allCats[4].GetID(), "/shamankit icons (the old name) still opens the buffs page")
+		SlashCmdList.SHAMANKIT("totems"); check(savedCat.opened == allCats[3].GetID(), "/shamankit totems opens the totems page")
+		SlashCmdList.SHAMANKIT("bar"); check(savedCat.opened == allCats[2].GetID(), "/shamankit bar opens the totem bar page")
+		SlashCmdList.SHAMANKIT(""); check(savedCat.opened == 7, "/shamankit opens the home page")
+		-- the old command names are still there
+		check(SLASH_SHAMANKIT1 == "/shamankit" and SLASH_SHAMANKIT2 == "/totemrange" and SLASH_SHAMANKIT3 == "/trange", "slash: /shamankit, and /totemrange and /trange as before")
+		-- a client without sub-pages gets four categories side by side
 		local before = #allCats
 		local sub = Settings.RegisterCanvasLayoutSubcategory
 		Settings.RegisterCanvasLayoutSubcategory = nil
 		ns.buildOptions()
 		Settings.RegisterCanvasLayoutSubcategory = sub
-		check(#allCats == before + 3, "no sub-page support: the pages become categories of their own")
+		check(#allCats == before + 4, "no sub-page support: the pages become categories of their own")
 	end
 
-	-- /totemrange status prints both readings
+	-- /shamankit status prints both readings
 	local lines = {}
 	local oldPrint = print
 	print = function(...) lines[#lines + 1] = table.concat({ ... }, " ") end
-	SlashCmdList.TOTEMRANGE("status")
+	SlashCmdList.SHAMANKIT("status")
 	print = oldPrint
 	local sawW, sawS
 	for _, l in ipairs(lines) do if l:find("weapon: ok") then sawW = true end if l:find("Lightning Shield: false") then sawS = true end end

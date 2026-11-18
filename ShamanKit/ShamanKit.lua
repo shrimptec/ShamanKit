@@ -1,6 +1,8 @@
--- TotemRange: your active totems, their timers, and whether you are in range of each.
+-- ShamanKit: small helpers for shamans.
+--   Totem bar: your active totems, their timers, and whether you are in range of each.
+--   Buffs: two small icons, one for a missing / running-out weapon enchant and one for Lightning Shield charges.
 --
--- Range: a totem is dropped at your feet, so your position when it appears IS the totem's position.
+-- Totem range: a totem is dropped at your feet, so your position when it appears IS the totem's position.
 -- Each tick the distance from there to you is compared to the totem's radius. If positions are
 -- unavailable (instances, combat) a buff totem falls back to "do I have its buff", and if that is
 -- unreadable too, nothing is marked (we never claim out of range unless we are sure).
@@ -26,16 +28,23 @@ ns.defaults = {
 	attach = false,        -- replace the default totem timers and sit under the player frame
 	attachX = 65, attachY = 8,
 	point = "CENTER", relPoint = "CENTER", x = 0, y = -200,
-	weaponOn = true,        -- small icon when the weapon has no enchant (or one about to run out)
-	shieldOn = true,        -- small icon with the Lightning Shield charges while it is up
-	auxAttached = true,     -- the two icons sit with the totem bar; false = a place of their own (drag it when unlocked)
-	auxSide = "auto",       -- which side of the bar: "auto" (below; beside a vertical bar), "bottom", "top", "left", "right"
+	weaponOn = true,        -- buff icon: the weapon has no enchant (or one about to run out)
+	shieldOn = true,        -- buff icon: the Lightning Shield charges while it is up
+	auxAnchor = "bar",      -- what the two buff icons hang on: "bar" (the totem bar), "player" (the player frame) or "free" (a place of their own, drag it when unlocked)
+	auxSide = "auto",       -- which side of it: "auto" (below the bar, beside a vertical bar; below the player frame, above it if the bar is there), "bottom", "top", "left", "right"
 	auxAlign = "start",     -- along that side: "start", "center" or "end"
 	auxOffX = 0, auxOffY = 0,   -- nudge from that spot
 	auxScale = 75,          -- icon size as a percent of the totem icon size
 	auxWarnMin = 2,         -- the weapon icon also shows when its enchant has less than this many minutes left (0 = only when gone)
 	auxPoint = "CENTER", auxRelPoint = "CENTER", auxX = 0, auxY = -260,   -- own place when not attached
 }
+
+-- Settings saved by older versions, brought up to date before the defaults are filled in.
+function ns.migrate(d)
+	if d.showRange == false and d.showOut == nil then d.showOut = false end   -- the old single switch hid both marks
+	if d.auxAnchor == nil then d.auxAnchor = (d.auxAttached == false) and "free" or "bar" end   -- "attached or not" became bar / player frame / own place
+	d.auxAttached = nil
+end
 
 local isSecret = issecretvalue or function() return false end
 local db
@@ -214,6 +223,7 @@ local bar, buttons, hits = nil, {}, {}
 local state = {}          -- slot -> { at = placement position, range, aura, name }
 local previewing = false
 local applyAux               -- the weapon / shield icons (defined further down); layout() asks it to re-place them
+local auxMode                -- what those icons hang on: "bar", "player" or "free"
 
 -- ---------------------------------------------------------------- positions & auras
 
@@ -236,7 +246,7 @@ local function guard(where, fn)
 			dbg("ERROR in %s: %s", where, tostring(err))
 			if not reported then
 				reported = true
-				print("|cff33ff99TotemRange|r hit an error (" .. where .. "): " .. tostring(err) .. "  (also logged)")
+				print("|cff33ff99ShamanKit|r hit an error (" .. where .. "): " .. tostring(err) .. "  (also logged)")
 			end
 		end
 	end
@@ -358,7 +368,7 @@ local function tooltip(self)
 end
 
 local function newButton(slot)
-	local b = CreateFrame("Button", "TotemRangeButton" .. slot, bar)
+	local b = CreateFrame("Button", "ShamanKitButton" .. slot, bar)
 	b.slot = slot
 
 	b.icon = b:CreateTexture(nil, "BACKGROUND")
@@ -435,7 +445,7 @@ end
 -- same spot (it is a plain frame, so it can be shown/hidden in combat); a totem that appears mid-fight
 -- shows where its button was parked and becomes clickable when the fight ends.
 local function newHit(slot, b)
-	local h = CreateFrame("Button", "TotemRangeHit" .. slot, bar, "SecureActionButtonTemplate")
+	local h = CreateFrame("Button", "ShamanKitHit" .. slot, bar, "SecureActionButtonTemplate")
 	h.slot = slot
 	h:RegisterForClicks("AnyUp", "AnyDown")
 	h:SetAttribute("pressAndHoldAction", true)
@@ -995,7 +1005,7 @@ local function indTooltip(self)
 end
 
 local function newIndicator(kind)
-	local f = CreateFrame("Frame", "TotemRange" .. (kind == "shield" and "Shield" or "Weapon"), aux)
+	local f = CreateFrame("Frame", "ShamanKit" .. (kind == "shield" and "Shield" or "Weapon"), aux)
 	f.kind = kind
 	f.icon = f:CreateTexture(nil, "BACKGROUND")
 	f.icon:SetAllPoints()
@@ -1033,7 +1043,7 @@ local function newIndicator(kind)
 	f:SetScript("OnLeave", GameTooltip_Hide)
 	f:RegisterForDrag("LeftButton")
 	f:SetScript("OnDragStart", function()
-		if db.locked == false and db.auxAttached == false and not InCombatLockdown() then aux:StartMoving() end
+		if db.locked == false and auxMode() == "free" and not InCombatLockdown() then aux:StartMoving() end
 	end)
 	f:SetScript("OnDragStop", function()
 		aux:StopMovingOrSizing()
@@ -1044,12 +1054,22 @@ local function newIndicator(kind)
 	return f
 end
 
--- Where the icons sit. Attached: on a side of the totem bar (db.auxSide; "auto" = below, or beside a vertical bar),
--- lined up along that side (db.auxAlign) and nudged by db.auxOffX / auxOffY. Not attached: a place of their own.
+-- Where the icons sit (db.auxAnchor). On the totem bar or the player frame: on a side of it (db.auxSide), lined up along
+-- that side (db.auxAlign) and nudged by db.auxOffX / auxOffY. Otherwise a place of their own.
 -- The shield takes the first place so the usual picture (shield up, enchant fine) has no gap. Out of combat only.
+-- "bar", "player" or "free"; anything else (a damaged value, or no player frame) means the bar
+auxMode = function()
+	local a = db.auxAnchor
+	if a == "free" then return "free" end
+	if a == "player" and PlayerFrame then return "player" end
+	return "bar"
+end
+ns.auxMode = auxMode
+
 local function auxSide()
 	local sd = db.auxSide
 	if sd == "bottom" or sd == "top" or sd == "left" or sd == "right" then return sd end
+	if auxMode() == "player" then return db.attach and "top" or "bottom" end   -- the totem bar hangs under the player frame when it replaces the default timers
 	return db.vertical and "left" or "bottom"
 end
 ns.auxSide = auxSide
@@ -1070,8 +1090,8 @@ local FAR_REL = {
 }
 
 -- room next to the bar taken by the range bars / the yards text, so the icons don't sit on them
-local function edgeGap(side)
-	local barOrText = (not db.vertical and side == "bottom") or (db.vertical and side == "right")
+local function edgeGap(side, mode)
+	local barOrText = mode == "bar" and ((not db.vertical and side == "bottom") or (db.vertical and side == "right"))
 	if not barOrText then return 6 end
 	local mode = distMode()
 	if mode == "bar" then return GAUGE_GAP + math.max(5, math.floor(db.size * 0.16 + 0.5)) + 6 end
@@ -1084,8 +1104,9 @@ applyAux = function()
 	if InCombatLockdown() then auxPending = true return end
 	auxPending = false
 	local s, gap = auxSize(), db.spacing
+	local mode = auxMode()
 	local side = auxSide()
-	local row = side == "bottom" or side == "top"       -- side by side along a top / bottom edge, stacked beside the bar
+	local row = side == "bottom" or side == "top"       -- side by side along a top / bottom edge, stacked beside it
 	local place = 0
 	for _, kind in ipairs({ "shield", "weapon" }) do
 		local f = ind[kind]
@@ -1105,21 +1126,22 @@ applyAux = function()
 	local long = math.max(place, 1) * s + math.max(place - 1, 0) * gap
 	if row then aux:SetSize(long, s) else aux:SetSize(s, long) end
 	aux:ClearAllPoints()
-	if db.auxAttached ~= false then
+	if mode ~= "free" then
+		local target = mode == "player" and PlayerFrame or bar
 		local align = db.auxAlign
 		if align ~= "center" and align ~= "end" then align = "start" end
 		local pair = SIDE_POINTS[side][align]
-		local g = edgeGap(side)
+		local g = edgeGap(side, mode)
 		local x = side == "left" and -g or (side == "right" and g or 0)
 		local y = side == "top" and g or (side == "bottom" and -g or 0)
 		local rel = pair[2]
-		local far = (not db.vertical and side == "right" and "right") or (db.vertical and side == "bottom" and "bottom")
+		local far = mode == "bar" and ((not db.vertical and side == "right" and "right") or (db.vertical and side == "bottom" and "bottom"))
 		if far then
 			rel = FAR_REL[far][align]
 			local full = MAX_SLOTS * db.size + (MAX_SLOTS - 1) * db.spacing
 			if far == "right" then x = x + full else y = y - full end
 		end
-		aux:SetPoint(pair[1], bar, rel, x + num(db.auxOffX, 0), y + num(db.auxOffY, 0))
+		aux:SetPoint(pair[1], target, rel, x + num(db.auxOffX, 0), y + num(db.auxOffY, 0))
 	else
 		aux:SetPoint(db.auxPoint or "CENTER", UIParent, db.auxRelPoint or "CENTER", num(db.auxX, 0), num(db.auxY, -260))
 	end
@@ -1128,7 +1150,7 @@ end
 -- Samples of the two icons (so there is something to look at and to grab): while the settings are open, and while
 -- the icons are unlocked in a place of their own. Only where the real thing is not showing.
 local function showSamples()
-	return ns.optionsOpen or (db.locked == false and db.auxAttached == false)
+	return ns.optionsOpen or (db.locked == false and auxMode() == "free")
 end
 
 local W = { st = "none" }       -- the last reading of the weapon
@@ -1213,7 +1235,7 @@ end
 ns.updateAux = guard("indicators", function() paintWeapon(); paintShield() end)
 
 local function buildAux()
-	aux = CreateFrame("Frame", "TotemRangeIndicators", bar)
+	aux = CreateFrame("Frame", "ShamanKitIndicators", bar)
 	aux:SetSize(1, 1)
 	aux:SetClampedToScreen(true)
 	aux:SetMovable(true)
@@ -1288,7 +1310,7 @@ end
 local guardedTick = guard("update", tick)
 
 local function build()
-	bar = CreateFrame("Frame", "TotemRangeBar", UIParent)
+	bar = CreateFrame("Frame", "ShamanKitBar", UIParent)
 	bar:SetClampedToScreen(true)
 	bar:SetMovable(true)
 	bar:RegisterForDrag("LeftButton")
@@ -1387,9 +1409,9 @@ end
 ev:RegisterEvent("ADDON_LOADED")
 ev:SetScript("OnEvent", guard("event", function(self, event, arg1, ...)
 	if event == "ADDON_LOADED" and arg1 == ADDON then
-		TotemRangeDB = TotemRangeDB or {}
-		db = TotemRangeDB
-		if db.showRange == false and db.showOut == nil then db.showOut = false end   -- old single switch hid both marks
+		ShamanKitDB = ShamanKitDB or {}
+		db = ShamanKitDB
+		ns.migrate(db)
 		for k, v in pairs(ns.defaults) do if db[k] == nil then db[k] = v end end
 		fixOrder()
 		fixReserve()
@@ -1417,7 +1439,7 @@ ev:SetScript("OnEvent", guard("event", function(self, event, arg1, ...)
 		refreshAll()
 		if db.locked == false and not reportedUnlocked then
 			reportedUnlocked = true
-			print("|cff33ff99TotemRange|r: the frame is unlocked (drag the box to move it). /totemrange lock to lock it.")
+			print("|cff33ff99ShamanKit|r: the frame is unlocked (drag the box to move it). /shamankit lock to lock it.")
 		end
 	elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
 		-- Totemic Call / Projection moves every totem to you without a totem event, so re-record
@@ -1440,7 +1462,7 @@ ev:SetScript("OnEvent", guard("event", function(self, event, arg1, ...)
 				(debugstack and tostring(debugstack(2, 6, 0)) or "-"):gsub("\n", " < "))
 			if not reportedBlocked then
 				reportedBlocked = true
-				print("|cff33ff99TotemRange|r: the game blocked an action (" .. tostring(what) .. "); details are in the addon's log.")
+				print("|cff33ff99ShamanKit|r: the game blocked an action (" .. tostring(what) .. "); details are in the addon's log.")
 			end
 		end
 	elseif event == "PLAYER_REGEN_ENABLED" and self.deferredBuild then
@@ -1492,14 +1514,15 @@ end))
 
 -- ---------------------------------------------------------------- slash
 
-SLASH_TOTEMRANGE1 = "/totemrange"
-SLASH_TOTEMRANGE2 = "/trange"
-SlashCmdList.TOTEMRANGE = function(msg)
+SLASH_SHAMANKIT1 = "/shamankit"
+SLASH_SHAMANKIT2 = "/totemrange"   -- the name this addon had before ShamanKit
+SLASH_SHAMANKIT3 = "/trange"
+SlashCmdList.SHAMANKIT = function(msg)
 	msg = (msg or ""):lower():match("^%s*(%S*)")
 	if msg == "unlock" or msg == "lock" then
 		db.locked = msg == "lock"
 		ns.updatePreview()
-		print("|cff33ff99TotemRange|r: frame " .. (db.locked and "locked" or "unlocked - open /totemrange to see and drag it"))
+		print("|cff33ff99ShamanKit|r: frame " .. (db.locked and "locked" or "unlocked - open /shamankit to see and drag it"))
 	elseif msg == "reset" then
 		ns.resetPosition()
 	elseif msg == "status" then
@@ -1509,17 +1532,17 @@ SlashCmdList.TOTEMRANGE = function(msg)
 			if s then
 				any = true
 				local r, how = rangeOf(slot)
-				print(("|cff33ff99TotemRange|r slot %d: %s, radius %d, %s via %s"):format(slot, s.name or "?", s.range,
+				print(("|cff33ff99ShamanKit|r slot %d: %s, radius %d, %s via %s"):format(slot, s.name or "?", s.range,
 					r == true and "in range" or r == false and "OUT of range" or "unknown", how))
 			end
 		end
-		if not any then print("|cff33ff99TotemRange|r: no active totems") end
+		if not any then print("|cff33ff99ShamanKit|r: no active totems") end
 		local st, left, _, list = readWeapon()
-		print(("|cff33ff99TotemRange|r weapon: %s%s (%s)  enchants: %s"):format(st, left and (", %ds left"):format(math.floor(left)) or "", db.weaponOn and "icon on" or "icon off", rawList(list)))
+		print(("|cff33ff99ShamanKit|r weapon: %s%s (%s)  enchants: %s"):format(st, left and (", %ds left"):format(math.floor(left)) or "", db.weaponOn and "icon on" or "icon off", rawList(list)))
 		local up, n = readShield()
-		print(("|cff33ff99TotemRange|r %s: %s%s (%s)"):format(shieldAuraName(), tostring(up),
+		print(("|cff33ff99ShamanKit|r %s: %s%s (%s)"):format(shieldAuraName(), tostring(up),
 			(up == true and not isSecret(n)) and (", charges " .. tostring(n)) or "", db.shieldOn and "icon on" or "icon off"))
 	elseif ns.openOptions then
-		ns.openOptions(msg)   -- "icons" / "totems" open that page
+		ns.openOptions(msg)   -- "bar", "totems" or "buffs" open that page
 	end
 end
