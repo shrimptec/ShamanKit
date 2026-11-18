@@ -1010,6 +1010,8 @@ end
 -- fight; the number it returns may be hidden, which a text widget can still show. "Gone" is believed when auras are
 -- readable, or when the game's own UNIT_AURA message says this instance was removed; otherwise the answer is "keep".
 local S = { up = false }        -- the last reading of the shield
+local playerGUID
+local paintShield                  -- (defined further down)
 local function shieldCharges(data)
 	local n = data.applications
 	if not isSecret(n) and not (type(n) == "number" and n > 0) then
@@ -1074,6 +1076,13 @@ local function readShield()
 			d, how = S.scanned, "scan"            -- the last scan's answer (at most 0.2 s old)
 		end
 	end
+	if not S.listed then   -- once per session: which aura calls this client has (so the next step is facts, not guesses)
+		S.listed = true
+		local names = {}
+		for k, v in pairs(C_UnitAuras) do if type(v) == "function" then names[#names + 1] = k end end
+		table.sort(names)
+		dbg("SHIELD C_UnitAuras has: %s", table.concat(names, " "))
+	end
 	if S.how ~= (d and how or "none") or not S.loggedHidden then   -- what the game let us read, once per fight and route
 		S.how, S.loggedHidden = d and how or "none", true
 		dbg("SHIELD auras hidden (combat=%s): read by %s (id=%s spell=%s)", tostring(InCombatLockdown()), d and how or "nothing", tostring(S.id), tostring(S.spell))
@@ -1091,6 +1100,62 @@ local function noteAuraInfo(info)
 		if not isSecret(id) and id == S.id then S.removed = true end
 	end
 end
+
+-- ---- the combat log: in a fight the game hides the aura itself, but the combat log still says what happens to it
+-- (a charge used = SPELL_AURA_REMOVED_DOSE with the charges left; gone = SPELL_AURA_REMOVED). That is the route used while
+-- auras are hidden. Only listened to while the shield icon is on, and each event is dismissed by its first word.
+local cl, clOn = CreateFrame("Frame"), false
+local clLines = 0
+local function clLog(...)
+	if clLines < 12 then clLines = clLines + 1; dbg(...) end   -- a few lines per fight: what the game let us read
+end
+
+local function shieldEvent(sub, amount)
+	local was = S.up
+	if sub == "SPELL_AURA_REMOVED" then
+		S.up, S.n, S.stale = false, nil, false
+	elseif sub == "SPELL_AURA_REMOVED_DOSE" or sub == "SPELL_AURA_APPLIED_DOSE" then
+		S.up, S.stale = true, false
+		if type(amount) == "number" then S.n = amount end
+	else   -- APPLIED / REFRESH
+		S.up, S.stale = true, false
+		S.n = (type(amount) == "number") and amount or S.n
+	end
+	clLog("SHIELD log %s amount=%s -> %s %s", sub, isSecret(amount) and "?" or tostring(amount), S.up and "up" or "down", tostring(S.n))
+	return was
+end
+
+cl:SetScript("OnEvent", guard("combatlog", function()
+	local ok, _, sub, _, _, _, _, _, destGUID, _, _, _, spellId, spellName, _, _, amount = pcall(CombatLogGetCurrentEventInfo)
+	if not ok then return end
+	if isSecret(sub) then
+		if not S.loggedSecretLog then S.loggedSecretLog = true; dbg("SHIELD combat log: event names are hidden in a fight") end
+		return
+	end
+	S.clOK = true                                  -- the log can be read: its word about the shield is trusted
+	if type(sub) ~= "string" or sub:sub(1, 11) ~= "SPELL_AURA_" then return end
+	if isSecret(spellName) or isSecret(destGUID) then
+		clLog("SHIELD combat log: %s but the aura name / target is hidden", sub)
+		return
+	end
+	if spellName ~= shieldAuraName() or not playerGUID or destGUID ~= playerGUID then return end
+	shieldEvent(sub, amount)
+	paintShield()
+end))
+
+local function syncCombatLog()
+	local want = (db and db.shieldOn and CombatLogGetCurrentEventInfo) and true or false
+	if want == clOn then return end
+	clOn = want
+	if want then
+		playerGUID = UnitGUID and UnitGUID("player") or nil
+		if isSecret(playerGUID) then playerGUID = nil end
+		pcall(cl.RegisterEvent, cl, "COMBAT_LOG_EVENT_UNFILTERED")
+	else
+		pcall(cl.UnregisterEvent, cl, "COMBAT_LOG_EVENT_UNFILTERED")
+	end
+end
+ns.syncCombatLog, ns.cl = syncCombatLog, cl
 
 local function timeText(secs)
 	if not secs then return "" end
@@ -1331,7 +1396,7 @@ local function paintWeapon()
 	f:Show()
 end
 
-local function paintShield()
+paintShield = function()
 	local f = ind.shield
 	if not f then return end
 	if db.shieldOn then
@@ -1340,7 +1405,7 @@ local function paintShield()
 			if (r and true or false) ~= S.up then dbg("SHIELD %s charges=%s combat=%s", r and "up" or "down", isSecret(n) and "?" or tostring(n), tostring(InCombatLockdown())) end
 			S.up, S.n, S.stale = r and true or false, n, false
 		else
-			S.stale = S.up and true or false   -- can't read it right now: the icon and the last number stay, a little grey
+			S.stale = S.up and not S.clOK       -- can't read it right now: the combat log keeps it right; with no log, the last number stays, a little grey
 		end
 	end
 	local real = db.shieldOn and S.up
@@ -1365,7 +1430,7 @@ local function paintShield()
 	f:Show()
 end
 
-ns.updateAux = guard("indicators", function() paintWeapon(); paintShield() end)
+ns.updateAux = guard("indicators", function() syncCombatLog(); paintWeapon(); paintShield() end)
 
 local function buildAux()
 	aux = CreateFrame("Frame", "ShamanKitIndicators", bar)
@@ -1622,7 +1687,7 @@ ev:SetScript("OnEvent", guard("event", function(self, event, arg1, ...)
 		dbg("%s: %s | aura readable=%s", event == "PLAYER_REGEN_DISABLED" and "COMBAT START" or "COMBAT END",
 			describe(playerPos()), tostring(aura ~= nil))
 		for slot in pairs(state) do state[slot].last = nil end
-		S.loggedHidden, S.how = false, nil
+		S.loggedHidden, S.how, S.loggedSecretLog, clLines = false, nil, false, 0
 		ns.updateAux()                          -- the buff icons notice the fight edge at once (a fight hides auras, the end shows them again)
 		if event == "PLAYER_REGEN_ENABLED" then
 			if attachPending then applyAttach() end

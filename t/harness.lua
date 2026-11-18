@@ -25,7 +25,8 @@ local function mock(kind)
 			return function() error("ADDON_ACTION_BLOCKED: " .. k .. " on a protected frame in combat") end
 		end
 		if k == "SetAttribute" then return function(self, n, v) self.attrs[n] = v end end
-		if k == "RegisterEvent" or k == "RegisterUnitEvent" then return function(self, n) REGISTERED[#REGISTERED + 1] = n end end
+		if k == "RegisterEvent" or k == "RegisterUnitEvent" then return function(self, n) REGISTERED[#REGISTERED + 1] = n; self.registered = self.registered or {}; self.registered[n] = true end end
+		if k == "UnregisterEvent" then return function(self, n) if self.registered then self.registered[n] = nil end end end
 		if k == "Show" then return function(self) self.shown = true end end
 		if k == "Hide" then return function(self) self.shown = false end end
 		if k == "SetShown" then return function(self, v) self.shown = v and true or false end end
@@ -118,6 +119,13 @@ function GetTotemInfo(slot)
 	return true, d.name, d.start, d.dur, d.icon
 end
 local auras = {}
+PLAYER_GUID = "Player-1-ABC"
+function UnitGUID() return "Player-1-ABC" end
+CLEU = nil             -- what the combat log says right now: { sub, destGUID, spellName, amount } (or { secret = true })
+function CombatLogGetCurrentEventInfo()
+	if CLEU.secret then return 1, secret(), false, "x", "n", 0, 0, secret(), "me", 0, 0, 324, secret() end
+	return 1, CLEU.sub, false, "x", "n", 0, 0, CLEU.dest or "Player-1-ABC", "me", 0, 0, 324, CLEU.nameSecret and secret() or CLEU.name or "Lightning Shield", 8, "BUFF", CLEU.amount
+end
 AURAS_HIDDEN = false   -- a fight: the game hides auras
 IDAURAS = {}           -- what a lookup by spell id still answers while they are hidden
 C_Secrets = { ShouldAurasBeSecret = function() return AURAS_HIDDEN end }
@@ -981,7 +989,7 @@ do
 	local want = { UNIT_AURA = true, UNIT_INVENTORY_CHANGED = true, PLAYER_EQUIPMENT_CHANGED = true }
 	local known = { ADDON_LOADED = true, PLAYER_ENTERING_WORLD = true, PLAYER_TOTEM_UPDATE = true, UNIT_SPELLCAST_SUCCEEDED = true,
 		PLAYER_REGEN_DISABLED = true, PLAYER_REGEN_ENABLED = true, ADDON_ACTION_BLOCKED = true, ADDON_ACTION_FORBIDDEN = true,
-		UNIT_AURA = true, UNIT_INVENTORY_CHANGED = true, PLAYER_EQUIPMENT_CHANGED = true }
+		UNIT_AURA = true, UNIT_INVENTORY_CHANGED = true, PLAYER_EQUIPMENT_CHANGED = true, COMBAT_LOG_EVENT_UNFILTERED = true }
 	local seen, unknown = {}, nil
 	for _, n in ipairs(REGISTERED) do seen[n] = true; if not known[n] then unknown = n end end
 	check(seen.UNIT_AURA and seen.UNIT_INVENTORY_CHANGED and seen.PLAYER_EQUIPMENT_CHANGED, "icons: the three events are registered")
@@ -1187,6 +1195,9 @@ do
 		local seen
 		for _, l in ipairs(ShamanKitDB.log or {}) do if l:find("SHIELD auras hidden") then seen = l end end
 		check(seen ~= nil and seen:find("instance id"), "the log says the route used in the fight")
+		local listed
+		for _, l in ipairs(ShamanKitDB.log or {}) do if l:find("C_UnitAuras has") then listed = true end end
+		check(listed, "the log lists which aura calls this client has")
 		-- the last charge is used and the aura goes: the game says so by instance id
 		IDAURAS[77] = nil; fire("UNIT_AURA", "player", { removedAuraInstanceIDs = { 77 } })
 		check(not S().shown, "the shield ends in the fight: the game says it was removed -> icon hidden at once")
@@ -1236,6 +1247,53 @@ do
 		AURAS_HIDDEN = false; inCombat = false; fire("PLAYER_REGEN_ENABLED"); IDAURAS = {}
 		auras["Lightning Shield"] = nil; fire("UNIT_AURA", "player")
 		noErrors("fight test: no error in the log")
+	end
+
+	-- ---- the combat log route: in a fight the aura can't be read at all (the real log: id and scan both say nothing)
+	do
+		secretPos = false; AURAS_HIDDEN = false; IDAURAS = {}; db.shieldOn = true; inCombat = false; ShamanKitDB.log = {}
+		local function clog(sub, amount, name, dest) CLEU = { sub = sub, amount = amount, name = name, dest = dest }; ns.cl.scripts.OnEvent(ns.cl, "COMBAT_LOG_EVENT_UNFILTERED") end
+		auras["Lightning Shield"] = { applications = 3, auraInstanceID = 353, spellId = 945 }; fire("UNIT_AURA", "player")
+		check(S().shown and S().count.text == "3", "log route: shield up, 3 charges")
+		check(ns.cl.registered and ns.cl.registered.COMBAT_LOG_EVENT_UNFILTERED, "log route: listening to the combat log while the shield icon is on")
+		AURAS_HIDDEN = true; inCombat = true; auras["Lightning Shield"] = nil   -- everything unreadable, as in the real log
+		fire("PLAYER_REGEN_DISABLED")
+		check(S().shown and S().count.color[1] < 0.9, "fight starts, combat log not heard yet: the number is grey (not claimed as live)")
+		clog("SWING_DAMAGE")
+		clog("SPELL_AURA_REMOVED_DOSE", 2)
+		check(S().shown and S().count.text == "2" and S().count.color[1] == 1, "REPORTED BUG: a charge is used: 2, white, live")
+		clog("SPELL_AURA_REMOVED_DOSE", 1)
+		check(S().count.text == "1", "a charge is used: 1")
+		clog("SPELL_AURA_REMOVED_DOSE", 0, "Rockbiter Weapon"); check(S().count.text == "1", "another spell's aura is ignored")
+		clog("SPELL_AURA_REMOVED_DOSE", 0, nil, "Creature-9"); check(S().count.text == "1", "an aura on someone else is ignored")
+		clog("SPELL_DAMAGE"); check(S().shown and S().count.text == "1", "other combat log events change nothing")
+		for _ = 1, 4 do second() end
+		check(S().shown and S().count.text == "1", "polls in the fight do not undo it")
+		clog("SPELL_AURA_REMOVED")
+		check(not S().shown, "REPORTED BUG: the shield ends in the fight: icon gone at once, not at the end of the fight")
+		clog("SPELL_AURA_APPLIED", 3)
+		check(S().shown and S().count.text == "3", "shield cast again in the fight: back with 3 (the game would not let us read it)")
+		clog("SPELL_AURA_REFRESH", 3); check(S().shown and S().count.text == "3", "refresh: 3")
+		clog("SPELL_AURA_APPLIED_DOSE", 2); check(S().count.text == "2", "dose applied: 2")
+		clog("SPELL_HEAL", 99); check(S().count.text == "2", "an event that is not about an aura is ignored, even with the shield's name")
+		CLEU = { sub = "SPELL_AURA_REMOVED", nameSecret = true }; ns.cl.scripts.OnEvent(ns.cl, "COMBAT_LOG_EVENT_UNFILTERED")
+		check(S().shown and S().count.text == "2", "an aura event whose name is hidden: nothing is guessed")
+		-- names hidden by the game: nothing is guessed
+		CLEU = { secret = true }; ns.cl.scripts.OnEvent(ns.cl, "COMBAT_LOG_EVENT_UNFILTERED")
+		check(S().shown and S().count.text == "2", "hidden combat log events: nothing changes")
+		local seenLog
+		for _, l in ipairs(ShamanKitDB.log) do if l:find("SHIELD log") then seenLog = true end end
+		check(seenLog, "the log says what the combat log said")
+		-- fight over: the real reading again
+		AURAS_HIDDEN = false; inCombat = false; auras["Lightning Shield"] = { applications = 2, auraInstanceID = 354, spellId = 945 }
+		fire("PLAYER_REGEN_ENABLED"); check(S().shown and S().count.text == "2", "fight over: readable again")
+		-- icon off: not listening (cost)
+		db.shieldOn = false; ns.updateAux()
+		check(not ns.cl.registered.COMBAT_LOG_EVENT_UNFILTERED, "shield icon off: the combat log is not listened to")
+		db.shieldOn = true; ns.updateAux()
+		check(ns.cl.registered.COMBAT_LOG_EVENT_UNFILTERED, "shield icon on again: listening")
+		auras["Lightning Shield"] = nil; fire("UNIT_AURA", "player")
+		noErrors("log route: no error in the log")
 	end
 
 	-- the switches
