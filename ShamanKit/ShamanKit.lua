@@ -28,7 +28,8 @@ ns.defaults = {
 	attach = false,        -- replace the default totem timers and sit under the player frame
 	attachX = 65, attachY = 8,
 	point = "CENTER", relPoint = "CENTER", x = 0, y = -200,
-	weaponOn = true,        -- buff icon: the weapon has no enchant (or one about to run out)
+	weaponOn = true,        -- buff icon for the weapon enchant
+	weaponMode = "missing", -- what it shows: "missing" (pops up when there is no enchant or it is about to run out) or "active" (the enchant that is on, with its time left, like the shield icon)
 	shieldOn = true,        -- buff icon: the Lightning Shield charges while it is up
 	auxAnchor = "bar",      -- what the two buff icons hang on: "bar" (the totem bar), "player" (the player frame) or "free" (a place of their own, drag it when unlocked)
 	auxSide = "auto",       -- which side of it: "auto" (below the bar, beside a vertical bar; below the player frame, above it if the bar is there), "bottom", "top", "left", "right"
@@ -974,7 +975,9 @@ local function readWeapon()
 	local ok, list = pcall(C_Item.GetWeaponEnchantInfo, WEAPON_MAIN)
 	if not ok or isSecret(list) then return "keep" end
 	if list ~= nil and type(list) ~= "table" then return "keep" end
-	local active, left, icon, untimed = false, nil, nil, false
+	-- Several enchants can be on (an imbue and an oil): the longest-lasting one is what is still protecting you, so its
+	-- time and its picture are the ones used. One with no timer (permanent) counts as the longest.
+	local active, bestLeft, bestIcon, anyIcon = false, nil, nil, nil
 	if list then
 		for _, e in ipairs(list) do
 			if type(e) == "table" and not isSecret(e) then
@@ -983,18 +986,17 @@ local function readWeapon()
 				if h then
 					active = true
 					local ms = e.timeLeft
-					if readable(ms) and ms > 0 then
-						if not left or ms / 1000 > left then left = ms / 1000 end   -- the longest-lasting one is what is still protecting you
-					else
-						untimed = true
-					end
-					if readable(e.enchantIconID) then icon = e.enchantIconID end
+					local l = (readable(ms) and ms > 0) and ms / 1000 or math.huge
+					local ic = readable(e.enchantIconID) and e.enchantIconID or nil
+					if ic then anyIcon = ic end
+					if not bestLeft or l > bestLeft then bestLeft, bestIcon = l, ic end
 				end
 			end
 		end
 	end
 	if not active then return "missing", nil, nil, list end
-	if untimed or not left then return "ok", nil, icon, list end
+	local icon, left = bestIcon or anyIcon, bestLeft
+	if left == math.huge then return "ok", nil, icon, list end
 	local warn = (readable(db.auxWarnMin) and db.auxWarnMin or WARN_DEFAULT_MIN) * 60   -- 0 = only when it is gone
 	if warn > 0 and left <= warn then return "expiring", left, icon, list end
 	return "ok", left, icon, list
@@ -1211,7 +1213,7 @@ local function showSamples()
 	return ns.optionsOpen
 end
 
-local W = { st = "none" }       -- the last reading of the weapon
+local W = { st = "none" }       -- the last reading of the weapon: state, seconds left, picture of the enchant
 
 local function rawList(list)
 	if type(list) ~= "table" then return tostring(list) end
@@ -1225,6 +1227,12 @@ local function rawList(list)
 	return #out > 0 and table.concat(out, " ") or "(empty)"
 end
 
+-- "missing" (the default): the icon pops up when there is no enchant or one is about to run out.
+-- "active": the icon shows the enchant that is on (its picture, its time left), like the shield icon; the yellow ring
+-- still marks one that is about to run out, and with no enchant there is nothing to show.
+local function weaponMode() return db.weaponMode == "active" and "active" or "missing" end
+ns.weaponMode = weaponMode
+
 local function paintWeapon()
 	local f = ind.weapon
 	if not f then return end
@@ -1232,14 +1240,22 @@ local function paintWeapon()
 		local st, left, icon, list = readWeapon()
 		if st ~= "keep" then
 			if st ~= W.st then dbg("WEAPON %s left=%s combat=%s entries=%s", st, left and ("%.0f"):format(left) or "-", tostring(InCombatLockdown()), rawList(list)) end
-			W.st, W.left = st, left
+			W.st, W.left, W.icon = st, left, icon
 			if icon and icon ~= db.lastImbue then db.lastImbue = icon end
 		end
 	end
-	local real = db.weaponOn and (W.st == "missing" or W.st == "expiring")
-	local view = real and W.st or ((db.weaponOn and showSamples()) and "sample" or "off")
-	local text = view == "expiring" and timeText(W.left) or ""
-	local key = view .. "|" .. text .. "|" .. tostring(db.lastImbue)
+	local mode = weaponMode()
+	local st = W.st
+	local on = st == "ok" or st == "expiring"
+	local real = db.weaponOn and ((mode == "active" and on) or (mode == "missing" and (st == "missing" or st == "expiring")))
+	local view
+	if real then view = (st == "ok") and "active" or st                                -- "active", "expiring" or "missing"
+	elseif db.weaponOn and showSamples() then view = "sample"                           -- a sample only while a settings page is open
+	else view = "off" end
+	local text = ""
+	if view == "expiring" or view == "active" then text = timeText(W.left)
+	elseif view == "sample" and mode == "active" then text = "30m" end
+	local key = view .. "|" .. mode .. "|" .. text .. "|" .. tostring(W.icon) .. "|" .. tostring(db.lastImbue)
 	if f.vkey == key then return end
 	f.vkey = key
 	if view == "off" then
@@ -1248,15 +1264,18 @@ local function paintWeapon()
 		f:Hide()
 		return
 	end
-	f.icon:SetTexture(weaponIcon())
+	local shows = view == "active" or view == "expiring"                                -- the enchant that is really on
+	f.icon:SetTexture(shows and (W.icon or weaponIcon()) or weaponIcon())
 	f.count:SetText("")
 	f.time:SetText(text)
-	local missing = view ~= "expiring"          -- missing (or the sample): grey picture + red pulse
-	f.icon:SetDesaturated(missing)
-	if missing then f.glow:SetVertexColor(1, 0.2, 0.1) else f.glow:SetVertexColor(1, 0.82, 0) end
-	f.glow:Show()
-	if f.pulse then if missing then f.pulse:Play() else f.pulse:Stop(); f.glow:SetAlpha(1) end end
-	f.tipLine = missing and "Your weapon has no enchant." or ("Your weapon enchant ends in " .. text .. ".")
+	local alert = view == "missing" or (view == "sample" and mode == "missing")        -- gone: grey picture + red pulse
+	f.icon:SetDesaturated(alert)
+	if alert then f.glow:SetVertexColor(1, 0.2, 0.1) else f.glow:SetVertexColor(1, 0.82, 0) end
+	if alert or view == "expiring" then f.glow:Show() else f.glow:Hide() end
+	if f.pulse then if alert then f.pulse:Play() else f.pulse:Stop(); f.glow:SetAlpha(1) end end
+	if alert then f.tipLine = "Your weapon has no enchant."
+	elseif text ~= "" then f.tipLine = "Your weapon enchant ends in " .. text .. "."
+	else f.tipLine = "Your weapon is enchanted." end
 	f:Show()
 end
 
@@ -1603,7 +1622,7 @@ SlashCmdList.SHAMANKIT = function(msg)
 		end
 		if not any then print("|cff33ff99ShamanKit|r: no active totems") end
 		local st, left, _, list = readWeapon()
-		print(("|cff33ff99ShamanKit|r weapon: %s%s (%s)  enchants: %s"):format(st, left and (", %ds left"):format(math.floor(left)) or "", db.weaponOn and "icon on" or "icon off", rawList(list)))
+		print(("|cff33ff99ShamanKit|r weapon: %s%s (%s)  enchants: %s"):format(st, left and (", %ds left"):format(math.floor(left)) or "", db.weaponOn and ("icon on, shows " .. (weaponMode() == "active" and "the active enchant" or "when missing")) or "icon off", rawList(list)))
 		local up, n = readShield()
 		print(("|cff33ff99ShamanKit|r %s: %s%s (%s)"):format(shieldAuraName(), tostring(up),
 			(up == true and not isSecret(n)) and (", charges " .. tostring(n)) or "", db.shieldOn and "icon on" or "icon off"))

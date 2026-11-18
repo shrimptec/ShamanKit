@@ -370,27 +370,37 @@ function ns.buildOptions()
 	-- ------------------------------------------------------------ page 3: the small icons
 	local icons = newPage("Buffs", "Buffs",
 		"A small icon when your weapon has no enchant, and one with your Lightning Shield charges.",
-		{ "weaponOn", "shieldOn", "auxAnchor", "auxSide", "auxAlign", "auxOffX", "auxOffY", "auxScale", "auxWarnMin" })
+		{ "weaponOn", "weaponMode", "shieldOn", "auxAnchor", "auxSide", "auxAlign", "auxOffX", "auxOffY", "auxScale", "auxWarnMin" })
 	local p3 = icons.panel
 	icons.onDefault = function() ns.resetAuxPlace() end
 
 	header(p3, "Show", LEFT, -78, COLW)
-	icons.add(checkbox(p3, "Weapon enchant missing / running out", "weaponOn", LEFT, -104))
-	icons.add(checkbox(p3, "Lightning Shield charges", "shieldOn", LEFT, -132))
-	icons.add(slider(p3, "Also warn when the enchant has under", "auxWarnMin", 0, 10, LEFT, -170,
+	local weaponBox = icons.add(checkbox(p3, "Weapon enchant icon", "weaponOn", LEFT, -102))
+	local modeLabel = p3:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+	modeLabel:SetPoint("TOPLEFT", LEFT + 28, -130)
+	modeLabel:SetText("It shows:")
+	local weaponMode = radioGroup(p3, {
+		{ "missing", "Only when missing or running out" },
+		{ "active", "Which enchant is on (like the shield)" },
+	}, LEFT + 28, -148, 1, 0, 22,
+		function() return ns.weaponMode() end,
+		function(v) ns.get().weaponMode = v end)
+	icons.add(weaponMode)
+	icons.add(checkbox(p3, "Lightning Shield charges", "shieldOn", LEFT, -198))
+	local warnSlider = icons.add(slider(p3, "Warn when the weapon enchant has under", "auxWarnMin", 0, 10, LEFT, -234,
 		function(v) return v == 0 and "only when gone" or (v .. (v == 1 and " minute" or " minutes")) end))
 
-	header(p3, "Size", LEFT, -240, COLW)
-	icons.add(slider(p3, "Icon size (% of the totem icons)", "auxScale", 50, 120, LEFT, -266, function(v) return v .. "%" end, 5))
+	header(p3, "Size", LEFT, -296, COLW)
+	icons.add(slider(p3, "Icon size (% of the totem icons)", "auxScale", 50, 120, LEFT, -320, function(v) return v .. "%" end, 5))
 
-	header(p3, "Moving", LEFT, -330, COLW)
-	local unlockIcons = icons.add(checkbox(p3, "Unlock to drag the icons", "locked", LEFT, -356,
+	header(p3, "Moving", LEFT, -384, COLW)
+	local unlockIcons = icons.add(checkbox(p3, "Unlock to drag the icons", "locked", LEFT, -408,
 		function() return ns.get().locked == false end,
 		function(on) ns.get().locked = not on end))
-	note(p3, "Only for \"Own place\" (it unlocks the totem bar too).\nDrag them while this page is open: sample icons show\nonly then. Or use the screen-position sliders.", LEFT + 28, -384)
+	note(p3, "Only for \"Own place\"; it unlocks the totem bar too.\nDrag while this page is open, or use the sliders.", LEFT + 28, -436)
 	local resetIcons = CreateFrame("Button", nil, p3, "UIPanelButtonTemplate")
 	resetIcons:SetSize(160, 24)
-	resetIcons:SetPoint("TOPLEFT", LEFT, -424)
+	resetIcons:SetPoint("TOPLEFT", LEFT, -472)
 	resetIcons:SetText("Reset icon position")
 	resetIcons:SetScript("OnClick", function() ns.resetAuxPlace(); icons.refresh() end)
 
@@ -435,9 +445,11 @@ function ns.buildOptions()
 		enable(nudgeX, on); enable(nudgeY, on)
 		enable(ownX, not on); enable(ownY, not on)
 		enable(unlockIcons, not on)
+		enableGroup(weaponMode, ns.get().weaponOn and true or false)   -- the choice only matters while the icon is on
 	end
 	for _, rb in ipairs(anchor.rbs) do rb:HookScript("OnClick", iconDependents) end
-	icons.after[#icons.after + 1] = function() anchor.refresh(); side.refresh(); align.refresh(); iconDependents() end
+	weaponBox:HookScript("OnClick", iconDependents)
+	icons.after[#icons.after + 1] = function() anchor.refresh(); side.refresh(); align.refresh(); weaponMode.refresh(); iconDependents() end
 
 	-- ------------------------------------------------------------ register: one category, three sub-pages
 	local category = Settings.RegisterCanvasLayoutCategory(p0, "ShamanKit")

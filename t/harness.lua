@@ -1064,6 +1064,101 @@ do
 	check(not S().shown, "shield: an unreadable aura list does not invent a shield")
 	secretPos = false
 
+	-- ---- weapon icon mode: "missing" (the default) or "active" (the enchant that is on, like the shield icon)
+	do
+		secretPos = false; AURAS_HIDDEN = false; inCombat = false
+		db.weaponOn = true; db.auxWarnMin = 2; db.lastImbue = nil; held = 555; itemClass, itemSub = 2, 8; dead = false; enchantSecret = false
+		enchants = {}; db.weaponMode = nil; second()
+		check(ns.weaponMode() == "missing" and W().shown, "weapon mode: nothing saved means 'missing' (the icon pops up when there is no enchant)")
+		db.weaponMode = "garbage"
+		check(ns.weaponMode() == "missing", "weapon mode: a damaged value means 'missing'")
+		check(ns.defaults.weaponMode == "missing", "weapon mode: the default is 'missing'")
+		db.weaponMode = "missing"
+		enchants = { { hasEnchant = true, timeLeft = 1800000, enchantIconID = 777 } }; second()
+		check(not W().shown, "missing mode: an enchant that is on shows nothing")
+
+		db.weaponMode = "active"; ns.updatePreview()
+		check(W().shown and W().icon.tex == 777 and W().time.text == "30m" and not W().glow.shown,
+			("active mode: the enchant that is on - its picture, its time, no ring (%s %s %s)"):format(tostring(W().icon.tex), tostring(W().time.text), tostring(W().glow.shown)))
+		enchants[1].timeLeft = 3600000; second(); check(W().time.text == "60m", "active mode: 60m")
+		enchants[1].timeLeft = 119000; second()
+		check(W().shown and W().time.text == "2m" and W().glow.shown and W().glow.color[1] == 1 and W().glow.color[2] == 0.82, "active mode: under the warning time -> the yellow ring appears")
+		enchants[1].timeLeft = 45000; second(); check(W().time.text == "45s", "active mode: 45s")
+		db.auxWarnMin = 0; second()
+		check(W().shown and not W().glow.shown and W().time.text == "45s", "active mode, warning off: still shown, no ring")
+		db.auxWarnMin = 2
+		enchants = { { hasEnchant = true, enchantType = 1, enchantIconID = 888 } }; second()
+		check(W().shown and W().icon.tex == 888 and W().time.text == "" and not W().glow.shown, "active mode: an enchant with no timer shows its picture, no time, no ring")
+		enchants = { { hasEnchant = true, timeLeft = 300000, enchantIconID = 111 }, { hasEnchant = true, timeLeft = 2700000, enchantIconID = 222 } }; second()
+		check(W().icon.tex == 222 and W().time.text == "45m", "two enchants: the longest-lasting one gives the picture and the time")
+		enchants = { { hasEnchant = false, enchantIconID = 0 }, { hasEnchant = true, timeLeft = 1800000, enchantIconID = 333 } }; second()
+		check(W().icon.tex == 333, "an empty entry beside the real one (what the game really sends) is ignored")
+		enchants = {}; second()
+		check(not W().shown, "active mode: no enchant -> nothing to show (here the icon is not an alert)")
+
+		-- the same safety rules as the other mode
+		enchants = { { hasEnchant = true, timeLeft = 1800000, enchantIconID = 777 } }; second()
+		check(W().shown, "active mode: enchant back -> icon back")
+		itemSub = 20; second(); check(not W().shown, "active mode: a fishing pole -> nothing"); itemSub = 8
+		dead = true; second(); check(not W().shown, "active mode: dead -> nothing"); dead = false
+		held = nil; second(); check(not W().shown, "active mode: nothing in the main hand -> nothing"); held = 555
+		second(); check(W().shown, "active mode: back")
+		enchantSecret = true; second(); check(W().shown and W().time.text == "30m", "active mode: a hidden reading keeps the icon as it was"); enchantSecret = false
+
+		-- off: not even read
+		db.weaponOn = false; ns.updatePreview(); check(not W().shown, "weapon icon off: nothing in active mode either")
+		enchantCalls = 0; for _ = 1, 3 do second() end
+		check(enchantCalls == 0, "weapon icon off: the enchant is not read in active mode")
+		db.weaponOn = true; ns.updatePreview()
+		check(W().shown, "weapon icon on again: active mode shows at once")
+		-- switching the mode repaints at once
+		db.weaponMode = "missing"; ns.updatePreview(); check(not W().shown, "switching to 'missing': the icon is gone at once (the enchant is on)")
+		db.weaponMode = "active"; ns.updatePreview(); check(W().shown, "switching to 'active': the icon is back at once")
+
+		-- samples: only with a settings page open, and they look like the mode they preview
+		enchants = {}; second(); ns.optionsOpen = true; ns.updatePreview()
+		check(W().shown and W().time.text == "30m" and not W().glow.shown, "settings open, active mode: the sample looks like an active enchant (30m, no ring)")
+		db.weaponMode = "missing"; ns.updatePreview()
+		check(W().shown and W().glow.shown and W().time.text == "", "settings open, missing mode: the sample is the red alert")
+		ns.optionsOpen = false; ns.updatePreview()
+		check(W().shown, "settings closed, missing mode, no enchant: the real alert")
+		db.weaponMode = "active"; ns.updatePreview()
+		check(not W().shown, "settings closed, active mode, no enchant: nothing (no sample left behind)")
+
+		-- cost: nothing drawn while nothing changes
+		enchants = { { hasEnchant = true, timeLeft = 1800000, enchantIconID = 777 } }; second(); second()
+		for k in pairs(CALLS) do CALLS[k] = 0 end
+		for _ = 1, 30 do second() end
+		check(CALLS.SetText == 0 and CALLS.SetTexture == 0 and CALLS.SetVertexColor == 0, "cost: active mode, nothing new -> nothing written")
+
+		-- the picture of the enchant that was on is what the alert shows afterwards
+		db.weaponMode = "missing"; enchants = {}; second()
+		check(W().shown and W().icon.tex == 777, "missing mode afterwards: the alert shows the enchant you had (777)")
+
+		-- the settings page
+		local pageB = savedCat.pages[4]
+		local function radioIn(value)
+			for _, f in ipairs(frames) do if f.value == value and f.parentFrame == pageB and f.scripts.OnClick then return f end end
+		end
+		local rA, rM = radioIn("active"), radioIn("missing")
+		check(rA ~= nil and rM ~= nil, "settings: two choices for the weapon icon")
+		pageB.OnRefresh()
+		check(rM.checked and not rA.checked, "settings: the saved choice is shown (missing)")
+		rA.scripts.OnClick(rA)
+		check(db.weaponMode == "active" and rA.checked and not rM.checked, "settings: clicking 'Which enchant is on' selects it")
+		second(); check(not W().shown, "settings: and it applies at once (no enchant -> nothing)")
+		rM.scripts.OnClick(rM)
+		check(db.weaponMode == "missing" and rM.checked and not rA.checked and W().shown, "settings: clicking 'Only when missing' selects it, the alert shows")
+		db.weaponOn = false; pageB.OnRefresh()
+		check(rA.enabled == false and rM.enabled == false, "settings: the two choices are greyed out while the icon is off")
+		db.weaponOn = true; pageB.OnRefresh()
+		check(rA.enabled == true and rM.enabled == true, "settings: and usable again with the icon on")
+		db.weaponMode = "active"; pageB.OnDefault()
+		check(db.weaponMode == "missing", "Defaults on the buffs page: back to 'missing'")
+		db.weaponMode = "missing"; enchants = {}; db.lastImbue = nil; second()
+		noErrors("weapon mode: no error in the log")
+	end
+
 	-- THE REPORTED BUG: "as soon as I get into combat it just disappears". In a fight the game hides auras and the
 	-- lookup by name answers "nothing" although the shield is there.
 	do

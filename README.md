@@ -4,9 +4,9 @@ Small helpers for shamans, for World of Warcraft: Forever, in the default UI sty
 
 - **Totem bar**: each active totem with its time left and whether you are in range of it. Can replace the default
   totem timers under the player frame.
-- **Buffs**: two small optional icons. One shows when your weapon has no enchant (or one that is about to run out;
-  main hand, hidden when dead, with no weapon or a fishing pole), the other shows your Lightning Shield charges while
-  it is up. They can hang on the totem bar or the player frame (any side, any alignment, nudge and size are settings)
+- **Buffs**: two small optional icons. The weapon icon either pops up when your weapon has no enchant (or one that is
+  about to run out), or, if you prefer, shows which enchant is on and its time left, like the shield icon (main hand,
+  hidden when dead, with no weapon or a fishing pole). The other icon shows your Lightning Shield charges while it is up. They can hang on the totem bar or the player frame (any side, any alignment, nudge and size are settings)
   or sit in a place of their own that you drag.
 
 Settings: Esc > Options > AddOns > ShamanKit (a home page and three pages: Totem bar, Totems, Buffs), or `/shamankit`.
