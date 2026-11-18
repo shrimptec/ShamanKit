@@ -29,7 +29,12 @@ ns.defaults = {
 	weaponOn = true,        -- small icon when the weapon has no enchant (or one about to run out)
 	shieldOn = true,        -- small icon with the Lightning Shield charges while it is up
 	auxAttached = true,     -- the two icons sit with the totem bar; false = a place of their own (drag it when unlocked)
-	auxPoint = "CENTER", auxRelPoint = "CENTER", auxX = 0, auxY = -260,
+	auxSide = "auto",       -- which side of the bar: "auto" (below; beside a vertical bar), "bottom", "top", "left", "right"
+	auxAlign = "start",     -- along that side: "start", "center" or "end"
+	auxOffX = 0, auxOffY = 0,   -- nudge from that spot
+	auxScale = 75,          -- icon size as a percent of the totem icon size
+	auxWarnMin = 2,         -- the weapon icon also shows when its enchant has less than this many minutes left (0 = only when gone)
+	auxPoint = "CENTER", auxRelPoint = "CENTER", auxX = 0, auxY = -260,   -- own place when not attached
 }
 
 local isSecret = issecretvalue or function() return false end
@@ -866,7 +871,7 @@ end
 -- as it was; a missing enchant is only claimed when the game plainly said "none".
 local aux, ind = nil, {}
 local auxPending = false
-local WARN_SECS = 120                          -- an enchant with less than this left counts as running out
+local WARN_DEFAULT_MIN = 2                    -- minutes
 local WEAPON_MAIN = (Enum and Enum.WeaponSlot and Enum.WeaponSlot.MainHand) or 0
 local WEAPON_CLASS = (Enum and Enum.ItemClass and Enum.ItemClass.Weapon) or 2
 local FISHING_POLE = 20                        -- weapon subclass: nobody wants an imbue reminder while fishing
@@ -948,7 +953,8 @@ local function readWeapon()
 	end
 	if not active then return "missing", nil, nil, list end
 	if untimed or not left then return "ok", nil, icon, list end
-	if left <= WARN_SECS then return "expiring", left, icon, list end
+	local warn = (readable(db.auxWarnMin) and db.auxWarnMin or WARN_DEFAULT_MIN) * 60   -- 0 = only when it is gone
+	if warn > 0 and left <= warn then return "expiring", left, icon, list end
 	return "ok", left, icon, list
 end
 
@@ -973,7 +979,8 @@ local function timeText(secs)
 	return ("%ds"):format(math.max(0, math.floor(secs)))
 end
 
-local function auxSize() return math.max(20, math.floor(db.size * 0.75 + 0.5)) end
+local function num(v, default) if readable(v) then return v end return default end
+local function auxSize() return math.max(16, math.floor(db.size * num(db.auxScale, 75) / 100 + 0.5)) end
 
 local function indTooltip(self)
 	GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
@@ -1037,13 +1044,48 @@ local function newIndicator(kind)
 	return f
 end
 
--- Where the icons sit: under the totem bar (beside it when the bar is vertical), or in a place of their own.
+-- Where the icons sit. Attached: on a side of the totem bar (db.auxSide; "auto" = below, or beside a vertical bar),
+-- lined up along that side (db.auxAlign) and nudged by db.auxOffX / auxOffY. Not attached: a place of their own.
 -- The shield takes the first place so the usual picture (shield up, enchant fine) has no gap. Out of combat only.
+local function auxSide()
+	local sd = db.auxSide
+	if sd == "bottom" or sd == "top" or sd == "left" or sd == "right" then return sd end
+	return db.vertical and "left" or "bottom"
+end
+ns.auxSide = auxSide
+
+-- { the icons' own point, the bar's point } for each side and alignment
+local SIDE_POINTS = {
+	bottom = { start = { "TOPLEFT", "BOTTOMLEFT" }, center = { "TOP", "BOTTOM" }, ["end"] = { "TOPRIGHT", "BOTTOMRIGHT" } },
+	top = { start = { "BOTTOMLEFT", "TOPLEFT" }, center = { "BOTTOM", "TOP" }, ["end"] = { "BOTTOMRIGHT", "TOPRIGHT" } },
+	left = { start = { "TOPRIGHT", "TOPLEFT" }, center = { "RIGHT", "LEFT" }, ["end"] = { "BOTTOMRIGHT", "BOTTOMLEFT" } },
+	right = { start = { "TOPLEFT", "TOPRIGHT" }, center = { "LEFT", "RIGHT" }, ["end"] = { "BOTTOMLEFT", "BOTTOMRIGHT" } },
+}
+-- the end of the bar where new totems appear (right of a horizontal bar, bottom of a vertical one): the bar is only as
+-- long as the totems showing, but a totem that appears mid-fight lands in the next place, so icons put there start
+-- after all the places instead
+local FAR_REL = {
+	right = { start = "TOPLEFT", center = "LEFT", ["end"] = "BOTTOMLEFT" },
+	bottom = { start = "TOPLEFT", center = "TOP", ["end"] = "TOPRIGHT" },
+}
+
+-- room next to the bar taken by the range bars / the yards text, so the icons don't sit on them
+local function edgeGap(side)
+	local barOrText = (not db.vertical and side == "bottom") or (db.vertical and side == "right")
+	if not barOrText then return 6 end
+	local mode = distMode()
+	if mode == "bar" then return GAUGE_GAP + math.max(5, math.floor(db.size * 0.16 + 0.5)) + 6 end
+	if mode == "yards" then return db.vertical and 52 or 18 end
+	return 6
+end
+
 applyAux = function()
 	if not aux then return end
 	if InCombatLockdown() then auxPending = true return end
 	auxPending = false
 	local s, gap = auxSize(), db.spacing
+	local side = auxSide()
+	local row = side == "bottom" or side == "top"       -- side by side along a top / bottom edge, stacked beside the bar
 	local place = 0
 	for _, kind in ipairs({ "shield", "weapon" }) do
 		local f = ind[kind]
@@ -1054,26 +1096,39 @@ applyAux = function()
 		f:ClearAllPoints()
 		if on then
 			local off = place * (s + gap)
-			if db.vertical then f:SetPoint("TOPLEFT", aux, "TOPLEFT", 0, -off) else f:SetPoint("TOPLEFT", aux, "TOPLEFT", off, 0) end
+			if row then f:SetPoint("TOPLEFT", aux, "TOPLEFT", off, 0) else f:SetPoint("TOPLEFT", aux, "TOPLEFT", 0, -off) end
 			place = place + 1
 		else
 			f:SetPoint("TOPLEFT", aux, "TOPLEFT", 0, 0)
 		end
 	end
 	local long = math.max(place, 1) * s + math.max(place - 1, 0) * gap
-	if db.vertical then aux:SetSize(s, long) else aux:SetSize(long, s) end
+	if row then aux:SetSize(long, s) else aux:SetSize(s, long) end
 	aux:ClearAllPoints()
 	if db.auxAttached ~= false then
-		if db.vertical then
-			aux:SetPoint("TOPRIGHT", bar, "TOPLEFT", -6, 0)   -- the range bars of a vertical bar are on its right
-		else
-			local mode = distMode()
-			local below = mode == "bar" and (GAUGE_GAP + math.max(5, math.floor(db.size * 0.16 + 0.5)) + 6) or (mode == "yards" and 18 or 6)
-			aux:SetPoint("TOPLEFT", bar, "BOTTOMLEFT", 0, -below)
+		local align = db.auxAlign
+		if align ~= "center" and align ~= "end" then align = "start" end
+		local pair = SIDE_POINTS[side][align]
+		local g = edgeGap(side)
+		local x = side == "left" and -g or (side == "right" and g or 0)
+		local y = side == "top" and g or (side == "bottom" and -g or 0)
+		local rel = pair[2]
+		local far = (not db.vertical and side == "right" and "right") or (db.vertical and side == "bottom" and "bottom")
+		if far then
+			rel = FAR_REL[far][align]
+			local full = MAX_SLOTS * db.size + (MAX_SLOTS - 1) * db.spacing
+			if far == "right" then x = x + full else y = y - full end
 		end
+		aux:SetPoint(pair[1], bar, rel, x + num(db.auxOffX, 0), y + num(db.auxOffY, 0))
 	else
-		aux:SetPoint(db.auxPoint or "CENTER", UIParent, db.auxRelPoint or "CENTER", db.auxX or 0, db.auxY or -260)
+		aux:SetPoint(db.auxPoint or "CENTER", UIParent, db.auxRelPoint or "CENTER", num(db.auxX, 0), num(db.auxY, -260))
 	end
+end
+
+-- Samples of the two icons (so there is something to look at and to grab): while the settings are open, and while
+-- the icons are unlocked in a place of their own. Only where the real thing is not showing.
+local function showSamples()
+	return ns.optionsOpen or (db.locked == false and db.auxAttached == false)
 end
 
 local W = { st = "none" }       -- the last reading of the weapon
@@ -1103,7 +1158,7 @@ local function paintWeapon()
 		end
 	end
 	local real = db.weaponOn and (W.st == "missing" or W.st == "expiring")
-	local view = real and W.st or ((db.weaponOn and ns.optionsOpen) and "sample" or "off")   -- a sample only while the settings are open
+	local view = real and W.st or ((db.weaponOn and showSamples()) and "sample" or "off")
 	local text = view == "expiring" and timeText(W.left) or ""
 	local key = view .. "|" .. text .. "|" .. tostring(db.lastImbue)
 	if f.vkey == key then return end
@@ -1137,7 +1192,7 @@ local function paintShield()
 		end
 	end
 	local real = db.shieldOn and S.up
-	local view = real and "up" or ((db.shieldOn and ns.optionsOpen) and "sample" or "off")
+	local view = real and "up" or ((db.shieldOn and showSamples()) and "sample" or "off")
 	local n = view == "sample" and 3 or S.n
 	local hidden = isSecret(n)                  -- a hidden number can't be compared, so it is passed straight on and never cached
 	local key = view .. "|" .. (hidden and "?" or tostring(n))
@@ -1195,13 +1250,20 @@ function ns.updatePreview()
 	updateShown()
 end
 
+-- where the two small icons sit: back to the usual spot (under the bar, or the middle-low screen place)
+function ns.resetAuxPlace()
+	local d = ns.defaults
+	db.auxSide, db.auxAlign, db.auxOffX, db.auxOffY = d.auxSide, d.auxAlign, d.auxOffX, d.auxOffY
+	db.auxPoint, db.auxRelPoint, db.auxX, db.auxY = d.auxPoint, d.auxRelPoint, d.auxX, d.auxY
+	if applyAux then applyAux() end
+end
+
 function ns.resetPosition()
 	local d = ns.defaults
 	db.point, db.relPoint, db.x, db.y = d.point, d.relPoint, d.x, d.y
 	db.attachX, db.attachY = d.attachX, d.attachY
-	db.auxPoint, db.auxRelPoint, db.auxX, db.auxY = d.auxPoint, d.auxRelPoint, d.auxX, d.auxY
 	applyAttach()
-	applyAux()
+	ns.resetAuxPlace()
 end
 
 function ns.get() return db end
@@ -1458,6 +1520,6 @@ SlashCmdList.TOTEMRANGE = function(msg)
 		print(("|cff33ff99TotemRange|r %s: %s%s (%s)"):format(shieldAuraName(), tostring(up),
 			(up == true and not isSecret(n)) and (", charges " .. tostring(n)) or "", db.shieldOn and "icon on" or "icon off"))
 	elseif ns.openOptions then
-		ns.openOptions()
+		ns.openOptions(msg)   -- "icons" / "totems" open that page
 	end
 end

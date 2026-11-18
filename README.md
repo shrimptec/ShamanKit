@@ -4,10 +4,11 @@ World of Warcraft: Forever addon. Shows each active totem with its time left and
 range of it, in the default UI style. Can replace the default totem timers under the player frame.
 Settings: Esc > Options > AddOns > TotemRange, or `/totemrange`.
 
-Two optional small icons sit under the totem bar (or free-standing, drag them when the frame is unlocked):
-**weapon enchant missing / running out** (main hand; hidden when dead, with no weapon or a fishing pole) and
-**Lightning Shield charges** (only while the shield is up). Both can be switched off in the settings.
-`/totemrange status` prints what the addon reads for them.
+Two optional small icons: **weapon enchant missing / running out** (main hand; hidden when dead, with no weapon or a
+fishing pole) and **Lightning Shield charges** (only while the shield is up). They sit on a side of the totem bar
+(above, below, left or right; start, middle or end; nudge and size are settings) or in a place of their own
+(drag them, or use the screen-position sliders). Settings has three pages: TotemRange, Totems, Small icons
+(`/totemrange icons` opens the last one). `/totemrange status` prints what the addon reads for the icons.
 
 ## Install and update (wowupd)
 

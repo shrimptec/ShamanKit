@@ -2,7 +2,7 @@
 ## Title: TotemRange
 ## Notes: Shows your active totems with a timer and whether you are in range of each. /totemrange
 ## Author: shrimptec
-## Version: 0.7.0
+## Version: 0.8.0
 ## X-Website: https://github.com/shrimptec/TotemRange
 ## SavedVariables: TotemRangeDB
 ## IconTexture: Interface\Icons\Spell_Nature_StrengthOfEarthTotem02

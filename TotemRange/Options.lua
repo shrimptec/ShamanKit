@@ -1,5 +1,8 @@
--- TotemRange settings: Esc > Options > AddOns > TotemRange, or /totemrange
--- Built from plain Blizzard textures (slider bar/thumb, check box) so it looks like the stock panels.
+-- TotemRange settings: Esc > Options > AddOns > TotemRange (three pages), or /totemrange
+-- Built from plain Blizzard textures (slider bar/thumb, check box, radio button) so it looks like the stock panels.
+--   TotemRange   the icons, the range display and where the bar sits
+--   Totems       order of the totems, keeping a place open, the placeholder icon
+--   Small icons  the weapon-enchant and Lightning Shield icons
 
 local ADDON, ns = ...
 
@@ -45,8 +48,30 @@ local function radio(parent, label, x, y, onClick)
 	return rb
 end
 
-local function slider(parent, label, key, lo, hi, x, y)
-	local title = parent:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+-- A group of radio buttons laid out in a grid (cols per row); items = { { value, label }, ... }.
+-- Choosing one writes get/set, redraws the group and the preview.
+local function radioGroup(parent, items, x, y, cols, dx, dy, get, set)
+	local group = { rbs = {} }
+	function group.refresh()
+		local now = get()
+		for _, rb in ipairs(group.rbs) do rb:SetChecked(rb.value == now) end
+	end
+	for i, item in ipairs(items) do
+		local col, row = (i - 1) % cols, math.floor((i - 1) / cols)
+		local rb = radio(parent, item[2], x + col * dx, y - row * dy, function()
+			set(item[1])
+			group.refresh()
+			ns.updatePreview()
+		end)
+		rb.value = item[1]
+		group.rbs[i] = rb
+	end
+	return group
+end
+
+-- fmt (optional) turns the number into the text beside the slider; step defaults to 1
+local function slider(parent, label, key, lo, hi, x, y, fmt, step)
+	local title = parent:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
 	title:SetPoint("TOPLEFT", x, y)
 	title:SetText(label)
 
@@ -62,70 +87,166 @@ local function slider(parent, label, key, lo, hi, x, y)
 	})
 	s:SetThumbTexture("Interface\\Buttons\\UI-SliderBar-Button-Horizontal")
 	s:SetMinMaxValues(lo, hi)
-	s:SetValueStep(1)
+	step = step or 1
+	s:SetValueStep(step)
 	s:SetObeyStepOnDrag(true)
 
 	local value = parent:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
 	value:SetPoint("LEFT", s, "RIGHT", 10, 0)
 
+	local function show(v) value:SetText(fmt and fmt(v) or v) end
 	s:SetScript("OnValueChanged", function(self, v)
-		v = math.floor(v + 0.5)
-		value:SetText(v)
+		v = math.floor(v / step + 0.5) * step
+		show(v)
 		if ns.get()[key] ~= v then
 			ns.get()[key] = v
 			ns.updatePreview()
 		end
 	end)
-	s.refresh = function() s:SetValue(ns.get()[key]); value:SetText(ns.get()[key]) end
+	s.refresh = function() s:SetValue(ns.get()[key]); show(ns.get()[key]) end
+	s.title = title
 	return s
 end
+
+-- a gold heading with a thin grey line under it
+local function header(parent, text, x, y, width)
+	local fs = parent:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+	fs:SetPoint("TOPLEFT", x, y)
+	fs:SetText(text)
+	local line = parent:CreateTexture(nil, "ARTWORK")
+	line:SetColorTexture(0.5, 0.5, 0.5, 0.45)
+	line:SetPoint("TOPLEFT", x, y - 17)
+	line:SetSize(width, 1)
+	return fs
+end
+
+local function note(parent, text, x, y)
+	local fs = parent:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+	fs:SetPoint("TOPLEFT", x, y)
+	fs:SetJustifyH("LEFT")
+	fs:SetText(text)
+	return fs
+end
+
+local function enable(c, on)
+	c:SetEnabled(on)
+	c:SetAlpha(on and 1 or 0.5)
+end
+
+local function enableGroup(group, on)
+	for _, rb in ipairs(group.rbs) do enable(rb, on) end
+end
+
+local LEFT, RIGHT, COLW = 16, 320, 280
 
 function ns.buildOptions()
 	if not (Settings and Settings.RegisterCanvasLayoutCategory) then return end
 
-	local panel = CreateFrame("Frame")
-	panel.name = "TotemRange"
+	-- Every page tells the bar to show its samples while it is on screen; two pages can be swapped in one go
+	-- (one hides as the other shows), so count the pages that are up instead of keeping one flag.
+	local up = {}
+	local function newPage(name, title, subtitle, keys)
+		local panel = CreateFrame("Frame")
+		panel.name = name
+		local page = { panel = panel, controls = {}, after = {}, keys = keys }
+		function page.add(c) page.controls[#page.controls + 1] = c; return c end
+		function page.refresh()
+			for _, c in ipairs(page.controls) do c.refresh() end
+			for _, f in ipairs(page.after) do f() end
+		end
+		local t = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+		t:SetPoint("TOPLEFT", 16, -16)
+		t:SetText(title)
+		note(panel, subtitle, 16, -42)
+		panel:SetScript("OnShow", function()
+			up[panel] = true
+			page.refresh()
+			ns.optionsOpen = true
+			ns.updatePreview()   -- sample totems / icons appear while a page is open
+		end)
+		panel:SetScript("OnHide", function()
+			up[panel] = nil
+			ns.optionsOpen = next(up) ~= nil
+			ns.updatePreview()
+		end)
+		panel.OnCommit = function() end
+		panel.OnRefresh = page.refresh
+		panel.OnDefault = function()
+			local db = ns.get()
+			for _, k in ipairs(page.keys) do db[k] = ns.defaults[k] end
+			if page.onDefault then page.onDefault() end
+			page.refresh()
+			ns.updatePreview()
+		end
+		return page
+	end
 
-	local title = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
-	title:SetPoint("TOPLEFT", 16, -16)
-	title:SetText("TotemRange")
+	-- ------------------------------------------------------------ page 1: the bar
+	local main = newPage("TotemRange", "TotemRange",
+		"Your active totems, how long they have left, and whether you are in range of each.",
+		{ "size", "spacing", "vertical", "showTimer", "showRange", "showOut", "tint", "distanceMode", "attach", "attachX", "attachY", "locked" })
+	local p1 = main.panel
+	note(p1, "More pages in the list on the left: Totems (order, placeholders) and Small icons (weapon enchant, Lightning Shield).", 16, -58)
 
-	local sub = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-	sub:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -6)
-	sub:SetText("Your active totems, how long they have left, and whether you are in range of each.")
+	header(p1, "Totem icons", LEFT, -88, COLW)
+	main.add(slider(p1, "Icon size", "size", 24, 80, LEFT, -114))
+	main.add(slider(p1, "Spacing", "spacing", 0, 24, LEFT, -169))
+	main.add(checkbox(p1, "Vertical layout", "vertical", LEFT, -222))
+	main.add(checkbox(p1, "Show time left", "showTimer", LEFT, -250))
 
-	local controls = {
-		slider(panel, "Icon size", "size", 24, 80, 16, -70),
-		slider(panel, "Spacing", "spacing", 0, 24, 16, -125),
-		checkbox(panel, "Vertical layout", "vertical", 16, -180),
-		checkbox(panel, "Show time left", "showTimer", 16, -210),
-		checkbox(panel, "Green check when in range", "showRange", 16, -240),
-		checkbox(panel, "Red cross when out of range", "showOut", 16, -270),
-		checkbox(panel, "Tint the icon red when out of range", "tint", 16, -300),
-		checkbox(panel, "Replace the default totem timers", "attach", 16, -330),
-		slider(panel, "Position left / right", "attachX", -200, 300, 40, -365),
-		slider(panel, "Position up / down", "attachY", -100, 100, 40, -420),
-		checkbox(panel, "Unlock frame (drag it to move)", "locked", 16, -475),
-	}
+	header(p1, "Range", LEFT, -292, COLW)
+	main.add(checkbox(p1, "Green check when in range", "showRange", LEFT, -318))
+	main.add(checkbox(p1, "Red cross when out of range", "showOut", LEFT, -344))
+	main.add(checkbox(p1, "Tint the icon red when out of range", "tint", LEFT, -370))
+	local distTitle = p1:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+	distTitle:SetPoint("TOPLEFT", LEFT, -406)
+	distTitle:SetText("Distance under each totem:")
+	local distance = radioGroup(p1, {
+		{ "bar", "Range bar  (room left in its range)" },
+		{ "yards", "Exact yards" },
+		{ "off", "Nothing" },
+	}, LEFT, -428, 1, 0, 24,
+		function() return ns.distMode() end,
+		function(v) ns.get().distanceMode = v end)
+	main.add(distance)
+
+	header(p1, "Position", RIGHT, -88, COLW)
+	local attach = main.add(checkbox(p1, "Replace the default totem timers", "attach", RIGHT, -114))
+	note(p1, "(sits under the player frame while this is ticked)", RIGHT + 28, -140)
+	local offX = main.add(slider(p1, "Position left / right", "attachX", -200, 300, RIGHT + 24, -162))
+	local offY = main.add(slider(p1, "Position up / down", "attachY", -100, 100, RIGHT + 24, -217))
 	-- "locked" is stored the other way round to how the box reads
-	local unlock = controls[#controls]
-	unlock.refresh = function() unlock:SetChecked(ns.get().locked == false) end
-	unlock:SetScript("OnClick", function(self)
-		ns.get().locked = not self:GetChecked()
-		ns.updatePreview()
-	end)
+	local unlock = main.add(checkbox(p1, "Unlock frame (drag it to move)", "locked", RIGHT, -274,
+		function() return ns.get().locked == false end,
+		function(on) ns.get().locked = not on end))
+	local reset = CreateFrame("Button", nil, p1, "UIPanelButtonTemplate")
+	reset:SetSize(140, 24)
+	reset:SetPoint("TOPLEFT", RIGHT, -312)
+	reset:SetText("Reset position")
+	reset:SetScript("OnClick", function() ns.resetPosition(); main.refresh() end)
 
-	-- One table for the bar: a row per place (first to last) with that element's icon, Up / Down arrows, whether to
-	-- keep its space open when the totem is down, and which totem its dim placeholder shows.
-	local COL = { icon = 310, label = 344, up = 404, down = 426, keep = 458, pick = 492 }
-	local tableTitle = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-	tableTitle:SetPoint("TOPLEFT", COL.icon, -70)
-	tableTitle:SetText("Totems, first to last in the bar")
-	local keepHead = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-	keepHead:SetPoint("TOPLEFT", COL.keep - 2, -96)
+	-- offsets only matter while attached; dragging only while detached (the small icons can be dragged on their own)
+	local function mainDependents()
+		local d = ns.get()
+		local on = d.attach and true or false
+		enable(offX, on); enable(offY, on)
+		enable(unlock, not on or d.auxAttached == false)
+	end
+	attach:HookScript("OnClick", mainDependents)
+	main.after[#main.after + 1] = function() distance.refresh(); mainDependents() end
+
+	-- ------------------------------------------------------------ page 2: the totems
+	local totems = newPage("Totems", "Totems",
+		"The order of the totems, keeping a place open while one is down, and what its dim placeholder shows.",
+		{ "rememberLast" })
+	local p2 = totems.panel
+	header(p2, "Totems, first to last in the bar", LEFT, -78, 580)
+	local COL = { icon = 16, label = 50, up = 116, down = 138, keep = 184, pick = 232 }
+	local keepHead = p2:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+	keepHead:SetPoint("TOPLEFT", COL.keep - 2, -104)
 	keepHead:SetText("Keep")
-	local pickHead = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-	pickHead:SetPoint("TOPLEFT", COL.pick, -96)
+	local pickHead = p2:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+	pickHead:SetPoint("TOPLEFT", COL.pick, -104)
 	pickHead:SetText("Placeholder icon")
 
 	local rows = {}
@@ -166,26 +287,26 @@ function ns.buildOptions()
 	end
 	for i = 1, #ns.fixOrder() do
 		local row = {}
-		local y = -116 - (i - 1) * 34
-		row.icon = panel:CreateTexture(nil, "ARTWORK")
+		local y = -124 - (i - 1) * 34
+		row.icon = p2:CreateTexture(nil, "ARTWORK")
 		row.icon:SetSize(26, 26)
 		row.icon:SetPoint("TOPLEFT", COL.icon, y)
 		row.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
-		row.label = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+		row.label = p2:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
 		row.label:SetPoint("TOPLEFT", COL.label, y - 6)
-		row.label:SetWidth(58)
+		row.label:SetWidth(62)
 		row.label:SetJustifyH("LEFT")
-		row.up = arrow(panel, COL.up, y - 3, -1)
+		row.up = arrow(p2, COL.up, y - 3, -1)
 		row.up.orderRow, row.up.orderDelta = i, -1
 		row.up:SetScript("OnClick", function() ns.moveSlot(i, -1); refreshRows() end)
-		row.down = arrow(panel, COL.down, y - 3, 1)
+		row.down = arrow(p2, COL.down, y - 3, 1)
 		row.down.orderRow, row.down.orderDelta = i, 1
 		row.down:SetScript("OnClick", function() ns.moveSlot(i, 1); refreshRows() end)
-		row.keep = checkbox(panel, "", nil, COL.keep, y,
+		row.keep = checkbox(p2, "", nil, COL.keep, y,
 			function() return ns.fixReserve()[rowSlot(i)] == true end,
 			function(on) ns.fixReserve()[rowSlot(i)] = on or nil end)
 		row.keep.rowIndex = i
-		row.pick = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+		row.pick = CreateFrame("Button", nil, p2, "UIPanelButtonTemplate")
 		row.pick:SetSize(112, 22)
 		row.pick:SetPoint("TOPLEFT", COL.pick, y - 2)
 		row.pick:RegisterForClicks("LeftButtonUp", "RightButtonUp")
@@ -207,108 +328,110 @@ function ns.buildOptions()
 		row.pick:SetScript("OnLeave", GameTooltip_Hide)
 		rows[i] = row
 	end
-	local resetOrder = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+	local resetOrder = CreateFrame("Button", nil, p2, "UIPanelButtonTemplate")
 	resetOrder:SetSize(120, 22)
-	resetOrder:SetPoint("TOPLEFT", COL.icon, -256)
+	resetOrder:SetPoint("TOPLEFT", COL.icon, -270)
 	resetOrder:SetText("Reset order")
 	resetOrder:SetScript("OnClick", function() ns.resetOrder(); refreshRows() end)
 
-	-- Remembering: the placeholder shows the last totem that was out in that place (a picked totem always wins).
-	local remember = checkbox(panel, "Placeholder shows the last totem used", "rememberLast", COL.icon, -290)
-	controls[#controls + 1] = remember
-	local rememberHint = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-	rememberHint:SetPoint("TOPLEFT", COL.icon + 28, -318)
-	rememberHint:SetText("A totem picked in the list above always wins.")
-
-	-- How the distance to each totem is shown under it.
-	local distTitle = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-	distTitle:SetPoint("TOPLEFT", COL.icon, -350)
-	distTitle:SetText("Distance under each totem")
-	local MODES = {
-		{ "bar", "Range bar  (room left in its range)" },
-		{ "yards", "Exact yards" },
-		{ "off", "Nothing" },
-	}
-	local radios = {}
-	local function refreshDistance()
-		local now = ns.distMode()
-		for _, r in ipairs(radios) do r.rb:SetChecked(r.mode == now) end
-	end
-	for i, m in ipairs(MODES) do
-		local rb = radio(panel, m[2], COL.icon, -374 - (i - 1) * 24, function()
-			ns.get().distanceMode = m[1]
-			refreshDistance()
-			ns.updatePreview()
-		end)
-		rb.mode = m[1]
-		radios[i] = { rb = rb, mode = m[1] }
-	end
-
-	-- The two small icons: weapon enchant missing / running out, and Lightning Shield charges.
-	local auxTitle = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-	auxTitle:SetPoint("TOPLEFT", COL.icon, -452)
-	auxTitle:SetText("Small icons next to the bar")
-	controls[#controls + 1] = checkbox(panel, "Weapon enchant missing / running out", "weaponOn", COL.icon, -474)
-	controls[#controls + 1] = checkbox(panel, "Lightning Shield charges", "shieldOn", COL.icon, -500)
-	local auxAttach = checkbox(panel, "Keep them with the totem bar", "auxAttached", COL.icon, -526)
-	controls[#controls + 1] = auxAttach
-
-	local reset = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-	reset:SetSize(140, 24)
-	reset:SetPoint("TOPLEFT", 16, -520)
-	reset:SetText("Reset position")
-	reset:SetScript("OnClick", ns.resetPosition)
-
-	-- offsets only matter while attached; dragging only while detached
-	local attach, offX, offY = controls[7], controls[8], controls[9]
-	local function enable(c, on)
-		c:SetEnabled(on)
-		c:SetAlpha(on and 1 or 0.5)
-	end
-	local function dependents()
-		local d = ns.get()
-		local on = d.attach and true or false
-		enable(offX, on); enable(offY, on)
-		enable(unlock, not on or d.auxAttached == false)   -- the two small icons can be dragged on their own even while the bar is attached
-	end
-	attach:HookScript("OnClick", dependents)
-	auxAttach:HookScript("OnClick", dependents)
-	local function refresh()
-		for _, c in ipairs(controls) do c.refresh() end
-		dependents()
-		refreshRows()
-		refreshDistance()
-	end
-	panel:SetScript("OnShow", function()
-		refresh()
-		ns.optionsOpen = true
-		ns.updatePreview()   -- sample totems appear while this page is open
-	end)
-	panel:SetScript("OnHide", function()
-		ns.optionsOpen = false
-		ns.updatePreview()
-	end)
-	panel.OnCommit = function() end
-	panel.OnRefresh = refresh
-	panel.OnDefault = function()
+	header(p2, "Placeholders", LEFT, -314, 580)
+	totems.add(checkbox(p2, "Placeholder shows the last totem used", "rememberLast", LEFT, -340))
+	note(p2, "A totem picked in the list above always wins.", LEFT + 28, -368)
+	totems.after[#totems.after + 1] = refreshRows
+	totems.onDefault = function()
 		local db = ns.get()
-		for k, v in pairs(ns.defaults) do
-			if k ~= "point" and k ~= "relPoint" and k ~= "x" and k ~= "y" and k ~= "auxPoint" and k ~= "auxRelPoint" and k ~= "auxX" and k ~= "auxY" then db[k] = v end
-		end
 		db.order = ns.defaultOrder()
 		db.reserve = {}
 		ns.fixHold(); db.hold.choice = {}
-		refresh()
-		ns.updatePreview()
 	end
 
-	local category = Settings.RegisterCanvasLayoutCategory(panel, "TotemRange")
+	-- ------------------------------------------------------------ page 3: the small icons
+	local icons = newPage("Small icons", "Small icons",
+		"A small icon when your weapon has no enchant, and one with your Lightning Shield charges.",
+		{ "weaponOn", "shieldOn", "auxAttached", "auxSide", "auxAlign", "auxOffX", "auxOffY", "auxScale", "auxWarnMin" })
+	local p3 = icons.panel
+	icons.onDefault = function() ns.resetAuxPlace() end
+
+	header(p3, "Show", LEFT, -78, COLW)
+	icons.add(checkbox(p3, "Weapon enchant missing / running out", "weaponOn", LEFT, -104))
+	icons.add(checkbox(p3, "Lightning Shield charges", "shieldOn", LEFT, -132))
+	icons.add(slider(p3, "Also warn when the enchant has under", "auxWarnMin", 0, 10, LEFT, -170,
+		function(v) return v == 0 and "only when gone" or (v .. (v == 1 and " minute" or " minutes")) end))
+
+	header(p3, "Size", LEFT, -240, COLW)
+	icons.add(slider(p3, "Icon size (% of the totem icons)", "auxScale", 50, 120, LEFT, -266, function(v) return v .. "%" end, 5))
+
+	header(p3, "Moving", LEFT, -330, COLW)
+	local unlockIcons = icons.add(checkbox(p3, "Unlock to drag the icons", "locked", LEFT, -356,
+		function() return ns.get().locked == false end,
+		function(on) ns.get().locked = not on end))
+	note(p3, "Only when they are not kept with the bar (it unlocks the\nbar too). Sample icons show while it is ticked.", LEFT + 28, -384)
+	local resetIcons = CreateFrame("Button", nil, p3, "UIPanelButtonTemplate")
+	resetIcons:SetSize(160, 24)
+	resetIcons:SetPoint("TOPLEFT", LEFT, -424)
+	resetIcons:SetText("Reset icon position")
+	resetIcons:SetScript("OnClick", function() ns.resetAuxPlace(); icons.refresh() end)
+
+	header(p3, "Position", RIGHT, -78, COLW)
+	local keepWith = icons.add(checkbox(p3, "Keep them with the totem bar", "auxAttached", RIGHT, -104))
+	local sideLabel = p3:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+	sideLabel:SetPoint("TOPLEFT", RIGHT, -140)
+	sideLabel:SetText("Side of the bar:")
+	local side = radioGroup(p3, {
+		{ "auto", "Auto" }, { "bottom", "Below" }, { "top", "Above" }, { "left", "Left" }, { "right", "Right" },
+	}, RIGHT, -160, 3, 76, 24,
+		function() local sd = ns.get().auxSide; return (sd == "bottom" or sd == "top" or sd == "left" or sd == "right") and sd or "auto" end,
+		function(v) ns.get().auxSide = v end)
+	icons.add(side)
+	local alignLabel = p3:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+	alignLabel:SetPoint("TOPLEFT", RIGHT, -216)
+	alignLabel:SetText("Along that side:")
+	local align = radioGroup(p3, {
+		{ "start", "Start" }, { "center", "Middle" }, { "end", "End" },
+	}, RIGHT, -236, 3, 76, 24,
+		function() local a = ns.get().auxAlign; return (a == "center" or a == "end") and a or "start" end,
+		function(v) ns.get().auxAlign = v end)
+	icons.add(align)
+	local nudgeX = icons.add(slider(p3, "Nudge left / right", "auxOffX", -100, 100, RIGHT, -272))
+	local nudgeY = icons.add(slider(p3, "Nudge up / down", "auxOffY", -100, 100, RIGHT, -327))
+
+	header(p3, "Own place (when not kept with the bar)", RIGHT, -378, COLW)
+	local ownX = icons.add(slider(p3, "Screen position left / right", "auxX", -1000, 1000, RIGHT, -404, nil, 5))
+	local ownY = icons.add(slider(p3, "Screen position up / down", "auxY", -600, 600, RIGHT, -459, nil, 5))
+
+	local function iconDependents()
+		local on = ns.get().auxAttached ~= false
+		enableGroup(side, on); enableGroup(align, on)
+		enable(nudgeX, on); enable(nudgeY, on)
+		enable(ownX, not on); enable(ownY, not on)
+		enable(unlockIcons, not on)
+	end
+	keepWith:HookScript("OnClick", iconDependents)
+	icons.after[#icons.after + 1] = function() side.refresh(); align.refresh(); iconDependents() end
+
+	-- ------------------------------------------------------------ register: one category, two sub-pages
+	local category = Settings.RegisterCanvasLayoutCategory(p1, "TotemRange")
 	Settings.RegisterAddOnCategory(category)
 	ns.category = category
+	local function register(page, name)
+		page.panel.parent = "TotemRange"
+		if Settings.RegisterCanvasLayoutSubcategory then
+			local ok, sub = pcall(Settings.RegisterCanvasLayoutSubcategory, category, page.panel, name)
+			if ok and sub then return sub end
+		end
+		-- no sub-pages on this client: a category of its own beside the main one
+		local c = Settings.RegisterCanvasLayoutCategory(page.panel, "TotemRange - " .. name)
+		Settings.RegisterAddOnCategory(c)
+		return c
+	end
+	ns.categoryTotems = register(totems, "Totems")
+	ns.categoryIcons = register(icons, "Small icons")
 end
 
-function ns.openOptions()
+-- which: nil = the main page, "icons" or "totems" = that page
+function ns.openOptions(which)
 	if not ns.category then print("TotemRange: settings panel unavailable on this client.") return end
-	local ok = pcall(Settings.OpenToCategory, ns.category:GetID())
-	if not ok then pcall(Settings.OpenToCategory, ns.category) end
+	local c = (which == "icons" and ns.categoryIcons) or (which == "totems" and ns.categoryTotems) or ns.category
+	local ok = pcall(Settings.OpenToCategory, c:GetID())
+	if not ok then pcall(Settings.OpenToCategory, c) end
 end

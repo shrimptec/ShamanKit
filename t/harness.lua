@@ -121,8 +121,21 @@ local auras = {}
 C_UnitAuras = { GetAuraDataBySpellName = function(_, name) if secretPos then return secret() end return auras[name] end }
 
 local savedCat
+local allCats = {}
 Settings = {
-	RegisterCanvasLayoutCategory = function(p, n) savedCat = { GetID = function() return 7 end, panel = p }; return savedCat end,
+	RegisterCanvasLayoutCategory = function(p, n)
+		local id = 7 + #allCats
+		local c = { GetID = function() return id end, panel = p, name = n }
+		allCats[#allCats + 1] = c
+		if not savedCat then savedCat = c end
+		return c
+	end,
+	RegisterCanvasLayoutSubcategory = function(parent, p, n)
+		local id = 7 + #allCats
+		local c = { GetID = function() return id end, panel = p, name = n, parent = parent }
+		allCats[#allCats + 1] = c
+		return c
+	end,
 	RegisterAddOnCategory = function() end,
 	OpenToCategory = function(id) savedCat.opened = id end,
 }
@@ -156,6 +169,18 @@ fire("ADDON_LOADED", "TotemRange")
 rawset(_G.TotemRangeBar, "protected", true)
 check(TotemRangeDB and TotemRangeDB.size == 36, "defaults filled")
 check(savedCat ~= nil, "settings category registered")
+check(#allCats == 3, "settings: a main page and two sub-pages (" .. #allCats .. " registered)")
+-- the older checks talk to "the panel": that is now all three pages at once
+do
+	local pages = {}
+	for _, c in ipairs(allCats) do pages[#pages + 1] = c.panel end
+	local all = { scripts = {} }
+	all.scripts.OnShow = function() for _, p in ipairs(pages) do p.scripts.OnShow() end end
+	all.scripts.OnHide = function() for _, p in ipairs(pages) do p.scripts.OnHide() end end
+	all.OnRefresh = function() for _, p in ipairs(pages) do p.OnRefresh() end end
+	all.OnDefault = function() for _, p in ipairs(pages) do p.OnDefault() end end
+	savedCat.pages, savedCat.panel = pages, all
+end
 fire("PLAYER_ENTERING_WORLD")
 check(not bar().anyShown, "bar hidden with no totems while locked")
 
@@ -493,7 +518,7 @@ do
 	TotemRangeDB.vertical = false; ns.apply()
 	-- the settings radio buttons
 	local radios = {}
-	for _, f in ipairs(frames) do if f.mode and f.scripts.OnClick then radios[f.mode] = f end end
+	for _, f in ipairs(frames) do if (f.value == "bar" or f.value == "yards" or f.value == "off") and f.scripts.OnClick then radios[f.value] = f end end
 	check(radios.bar and radios.yards and radios.off, "settings: three choices (range bar, exact yards, nothing)")
 	radios.yards.scripts.OnClick(radios.yards)
 	check(TotemRangeDB.distanceMode == "yards" and radios.yards.checked and not radios.bar.checked, "clicking 'Exact yards' selects it and unticks the others")
@@ -1116,6 +1141,119 @@ do
 	enchants = { { hasEnchant = true, timeLeft = 1800000 } }; auras["Lightning Shield"] = nil
 	second(); fire("UNIT_AURA", "player")
 	check(not W().shown and not S().shown, "icons: back to nothing when both are fine")
+
+	-- ---- placement: side of the bar, alignment, nudges, size, warning time
+	do
+		db.distanceMode = "off"; db.auxAttached = true; db.vertical = false; db.size, db.spacing = 36, 4
+		db.auxSide, db.auxAlign, db.auxOffX, db.auxOffY, db.auxScale = "auto", "start", 0, 0, 75
+		local function at(point, rel, relPoint, x, y, msg)
+			ns.updatePreview()
+			local a = aux.anchor
+			check(a[1] == point and a[2] == rel and a[3] == relPoint and a[4] == x and a[5] == y,
+				("%s (%s %s %s %s %s)"):format(msg, tostring(a[1]), a[2] == bar() and "bar" or "?", tostring(a[3]), tostring(a[4]), tostring(a[5])))
+		end
+		at("TOPLEFT", bar(), "BOTTOMLEFT", 0, -6, "side auto, horizontal bar: below, at its start")
+		db.auxSide = "top";    at("BOTTOMLEFT", bar(), "TOPLEFT", 0, 6, "side above")
+		db.auxSide = "left";   at("TOPRIGHT", bar(), "TOPLEFT", -6, 0, "side left")
+		db.auxSide = "right";  at("TOPLEFT", bar(), "TOPLEFT", 6 + 4 * 36 + 3 * 4, 0, "side right of a horizontal bar: after all four places (a new totem lands in the next one)")
+		db.auxSide = "bottom"; db.auxAlign = "center"; at("TOP", bar(), "BOTTOM", 0, -6, "below, middle")
+		db.auxAlign = "end";   at("TOPRIGHT", bar(), "BOTTOMRIGHT", 0, -6, "below, end")
+		db.auxSide = "right";  db.auxAlign = "end"; at("BOTTOMLEFT", bar(), "BOTTOMLEFT", 6 + 156, 0, "right, end: bottom edge, after all four places")
+		db.auxSide, db.auxAlign = "left", "center"; at("RIGHT", bar(), "LEFT", -6, 0, "left, middle")
+		db.auxSide, db.auxAlign = "bottom", "start"
+		db.auxOffX, db.auxOffY = 10, -3; at("TOPLEFT", bar(), "BOTTOMLEFT", 10, -9, "nudge left/right and up/down is added")
+		db.auxOffX, db.auxOffY = 0, 0
+		db.distanceMode = "bar"; at("TOPLEFT", bar(), "BOTTOMLEFT", 0, -(3 + 6 + 6), "below a bar with range bars: clear of them")
+		db.distanceMode = "yards"; at("TOPLEFT", bar(), "BOTTOMLEFT", 0, -18, "below a bar with yards text: clear of it")
+		db.distanceMode = "off"
+		-- vertical bar
+		db.vertical = true; db.auxSide = "auto"
+		at("TOPRIGHT", bar(), "TOPLEFT", -6, 0, "side auto, vertical bar: to its left")
+		db.auxSide = "right"; db.distanceMode = "bar"; at("TOPLEFT", bar(), "TOPRIGHT", 3 + 6 + 6, 0, "right of a vertical bar: clear of its range bars")
+		db.distanceMode = "off"
+		db.auxSide = "bottom"; at("TOPLEFT", bar(), "TOPLEFT", 0, -(6 + 156), "below a vertical bar: after all four places")
+		db.auxSide = "left"; ns.updatePreview()
+		check(W().anchor[4] == 0 and W().anchor[5] < 0 and S().anchor[5] == 0, "beside the bar the two icons stack (shield on top)")
+		db.auxSide = "bottom"; db.vertical = false; ns.updatePreview()
+		check(W().anchor[5] == 0 and W().anchor[4] > 0 and S().anchor[4] == 0, "under the bar the two icons sit side by side (shield first)")
+		-- a damaged value means the usual spot
+		db.auxSide, db.auxAlign, db.auxOffX = "sideways", 7, "x"
+		at("TOPLEFT", bar(), "BOTTOMLEFT", 0, -6, "damaged side / align / nudge fall back to the usual spot")
+		db.auxSide, db.auxAlign, db.auxOffX = "auto", "start", 0
+
+		-- size
+		db.auxScale = 100; ns.updatePreview(); check(S().w == 36, "size 100%: as big as a totem icon")
+		db.auxScale = 50; ns.updatePreview(); check(S().w == 18, "size 50%: half")
+		db.size = 24; ns.updatePreview(); check(S().w == 16, "size: never smaller than 16")
+		db.size = 36; db.auxScale = 75; ns.updatePreview(); check(S().w == 27, "size 75% of 36 = 27")
+
+		-- warning time
+		enchants = { { hasEnchant = true, timeLeft = 45000 } }
+		db.auxWarnMin = 0; second(); check(not W().shown, "warn 0: only when it is gone (45 s left is quiet)")
+		db.auxWarnMin = 5; enchants[1].timeLeft = 240000; second()
+		check(W().shown and W().time.text == "4m", "warn 5 min: 4 minutes left shows 4m (" .. tostring(W().time.text) .. ")")
+		enchants[1].timeLeft = 310000; second(); check(not W().shown, "warn 5 min: 5 min 10 s left is quiet")
+		db.auxWarnMin = 2; enchants = {}; second()
+		check(W().shown and W().time.text == "", "warn 2 min (the default): gone still shows")
+		db.auxWarnMin = nil; enchants = { { hasEnchant = true, timeLeft = 100000 } }; second()
+		check(W().shown, "a missing warn setting means 2 minutes")
+		db.auxWarnMin = 2; enchants = {}; second()
+
+		-- unlocked and on its own: the samples are there to grab, without opening the settings
+		enchants = { { hasEnchant = true, timeLeft = 1800000 } }; auras["Lightning Shield"] = nil; fire("UNIT_AURA", "player"); second()
+		db.locked = true; db.auxAttached = false; ns.optionsOpen = false; ns.updatePreview()
+		check(not W().shown and not S().shown, "locked and detached: nothing to see when all is well")
+		db.locked = false; ns.updatePreview()
+		check(W().shown and S().shown, "unlocked and detached: sample icons to drag, settings closed")
+		auras["Lightning Shield"] = { applications = 2 }; fire("UNIT_AURA", "player")
+		check(S().count.text == "2", "unlocked and detached: the real shield wins over the sample")
+		auras["Lightning Shield"] = nil; fire("UNIT_AURA", "player")
+		db.auxAttached = true; ns.updatePreview()
+		check(not W().shown and not S().shown, "unlocked but attached: no samples (the bar is what you drag)")
+		db.locked = true; ns.updatePreview()
+		db.auxAttached = true
+	end
+
+	-- ---- the settings pages
+	do
+		local pages = savedCat.pages
+		local function frameWith(page, pred) for _, f in ipairs(frames) do if pred(f) then return f end end end
+		check(pages[1].name == "TotemRange" and pages[2].name == "Totems" and pages[3].name == "Small icons", "pages: TotemRange, Totems, Small icons")
+		check(allCats[2].parent == allCats[1] and allCats[3].parent == allCats[1], "pages: the two others are sub-pages of the main one")
+		-- the preview follows the pages: two pages swapped in one go keep it on
+		pages[1].scripts.OnShow(); check(ns.optionsOpen, "pages: opening one turns the samples on")
+		pages[3].scripts.OnShow(); pages[1].scripts.OnHide()
+		check(ns.optionsOpen, "pages: one page hiding while another shows keeps the samples on")
+		pages[3].scripts.OnHide(); check(not ns.optionsOpen, "pages: the last one closing turns them off")
+		-- choosing a side in the page
+		local top = frameWith(pages[3], function(f) return f.value == "top" and f.scripts.OnClick end)
+		check(top ~= nil, "pages: the small-icons page has a 'Above' choice")
+		top.scripts.OnClick(top)
+		check(db.auxSide == "top" and top.checked, "pages: clicking 'Above' selects it")
+		check(aux.anchor[1] == "BOTTOMLEFT" and aux.anchor[3] == "TOPLEFT", "pages: and the icons move above the bar")
+		local mid = frameWith(pages[3], function(f) return f.value == "center" and f.scripts.OnClick end)
+		mid.scripts.OnClick(mid); check(db.auxAlign == "center", "pages: clicking 'Middle' lines them up in the middle")
+		-- each page resets only its own settings
+		db.auxScale, db.auxWarnMin, db.weaponOn, db.size, db.rememberLast = 100, 5, false, 60, false
+		pages[3].OnDefault()
+		check(db.auxScale == 75 and db.auxWarnMin == 2 and db.weaponOn == true and db.auxSide == "auto" and db.auxAlign == "start",
+			"defaults on the icons page: its settings, and the side / alignment, go back")
+		check(db.size == 60 and db.rememberLast == false, "defaults on the icons page: nothing on the other pages changed")
+		pages[2].OnDefault(); check(db.rememberLast == true and db.size == 60, "defaults on the totems page: only its own")
+		pages[1].OnDefault(); check(db.size == 36, "defaults on the main page: its own")
+		db.locked = true
+		-- /totemrange icons
+		SlashCmdList.TOTEMRANGE("icons"); check(savedCat.opened == allCats[3].GetID(), "/totemrange icons opens the small-icons page")
+		SlashCmdList.TOTEMRANGE("totems"); check(savedCat.opened == allCats[2].GetID(), "/totemrange totems opens the totems page")
+		SlashCmdList.TOTEMRANGE(""); check(savedCat.opened == 7, "/totemrange opens the main page")
+		-- a client without sub-pages gets three categories side by side
+		local before = #allCats
+		local sub = Settings.RegisterCanvasLayoutSubcategory
+		Settings.RegisterCanvasLayoutSubcategory = nil
+		ns.buildOptions()
+		Settings.RegisterCanvasLayoutSubcategory = sub
+		check(#allCats == before + 3, "no sub-page support: the pages become categories of their own")
+	end
 
 	-- /totemrange status prints both readings
 	local lines = {}
