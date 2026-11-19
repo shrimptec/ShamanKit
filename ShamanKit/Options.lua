@@ -72,8 +72,10 @@ local function radioGroup(parent, items, x, y, cols, dx, dy, get, set)
 	return group
 end
 
--- fmt (optional) turns the number into the text beside the slider; step defaults to 1
-local function slider(parent, label, key, lo, hi, x, y, fmt, step)
+-- fmt (optional) turns the number into the text beside the slider; step defaults to 1; key may be a function that
+-- names the setting (one slider that edits different settings)
+local function slider(parent, label, keyArg, lo, hi, x, y, fmt, step)
+	local function theKey() if type(keyArg) == "function" then return keyArg() end return keyArg end
 	local title = parent:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
 	title:SetPoint("TOPLEFT", x, y)
 	title:SetText(label)
@@ -101,13 +103,14 @@ local function slider(parent, label, key, lo, hi, x, y, fmt, step)
 	s:SetScript("OnValueChanged", function(self, v)
 		v = math.floor(v / step + 0.5) * step
 		show(v)
+		local key = theKey()
 		if ns.get()[key] ~= v then
 			ns.get()[key] = v
 			ns.updatePreview()
 		end
 	end)
-	s.refresh = function() s:SetValue(ns.get()[key]); show(ns.get()[key]) end
-	s.title = title
+	s.refresh = function() local key = theKey(); s:SetValue(ns.get()[key]); show(ns.get()[key]) end
+	s.title, s.valueText = title, value
 	return s
 end
 

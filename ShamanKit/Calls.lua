@@ -41,6 +41,22 @@ D.callAlign = "start"         -- along that side: start / center / end
 D.callOffX, D.callOffY = 0, 0 -- a nudge from there
 D.callPoint, D.callRelPoint, D.callX, D.callY = "CENTER", "CENTER", 0, -200   -- the place of their own
 
+-- each button can also be placed on its own, apart from the others: the same settings again, one set per button
+-- (posCallOwn, posCallAnchor, posCallSide ... posTotemicOwn ... posRecallY)
+local POS = { call = "posCall", totemic = "posTotemic", recall = "posRecall" }
+local OWN_Y = { call = -200, totemic = -250, recall = -300 }   -- apart in their own places, so they don't pile up
+ns.CALL_POS_KEYS = {}
+for _, kind in ipairs({ "call", "totemic", "recall" }) do
+	local k = POS[kind]
+	D[k .. "Own"] = false          -- true: this button is placed by the settings below, not with the others
+	D[k .. "Anchor"], D[k .. "Side"], D[k .. "Align"] = "bar", "start", "start"
+	D[k .. "OffX"], D[k .. "OffY"] = 0, 0
+	D[k .. "Point"], D[k .. "RelPoint"], D[k .. "X"], D[k .. "Y"] = "CENTER", "CENTER", 0, OWN_Y[kind]
+	for _, f in ipairs({ "Own", "Anchor", "Side", "Align", "OffX", "OffY", "Point", "RelPoint", "X", "Y" }) do
+		ns.CALL_POS_KEYS[#ns.CALL_POS_KEYS + 1] = k .. f
+	end
+end
+
 -- the three Call spells (client ids; levels 20 / 30 / 40) and the two single ones
 local CALLS = {
 	{ id = 66842, key = "elements",  label = "Call of the Elements" },
@@ -117,15 +133,20 @@ end
 
 local function buttonSize() return math.max(16, math.floor(db.size * clamp(db.callScale, 50, 150, 100) / 100 + 0.5)) end
 
+-- Where something sits is read from a set of settings named by a prefix: "call" is the group of buttons, "posCall" /
+-- "posTotemic" / "posRecall" a button placed on its own.
+local function ownOf(kind) return POS[kind] ~= nil and db[POS[kind] .. "Own"] == true end
+local function pfxOf(kind) return ownOf(kind) and POS[kind] or "call" end
+
 -- "bar" or "free" (a damaged value counts as the bar)
-local function mode() return db.callAnchor == "free" and "free" or "bar" end
+local function modeOf(pfx) return db[pfx .. "Anchor"] == "free" and "free" or "bar" end
+local function mode() return modeOf("call") end
 ns.callMode = mode
 
 local OPPOSITE = { left = "right", right = "left", top = "bottom", bottom = "top" }
 
 -- the side you asked for, as left / right / top / bottom ("start" and "end" are before / after the totems)
-local function sideWanted()
-	local sd = db.callSide
+local function sideWanted(sd)
 	if sd == "left" or sd == "right" or sd == "top" or sd == "bottom" then return sd end
 	if sd == "end" then return db.vertical and "bottom" or "right" end
 	return db.vertical and "top" or "left"
@@ -139,12 +160,14 @@ local function auxThere(side)
 end
 
 -- the side that is used: the one you asked for, unless the buff icons are there (then the opposite one), and whether it moved
-local function sideNow()
-	local want = sideWanted()
+local function sideFor(pfx)
+	local want = sideWanted(db[pfx .. "Side"])
 	if auxThere(want) then return OPPOSITE[want], true end
 	return want, false
 end
+local function sideNow() return sideFor("call") end
 ns.callSideNow = sideNow
+function ns.callSideOf(kind) return sideFor(pfxOf(kind)) end
 
 -- is the totem bar up (a totem out, or the settings open to look at it)?
 local function barUp() return (ns.barUp and ns.barUp()) or ns.optionsOpen == true end
@@ -155,8 +178,34 @@ local function visibleNow()
 	return true
 end
 
--- drag the buttons around: only in their own place, with the frames unlocked (a press must not cast then)
-local function dragging() return mode() == "free" and db.locked == false end
+-- drag a button (or the group) around: only in its own place, with the frames unlocked (a press must not cast then)
+local function dragging(pfx) return modeOf(pfx or "call") == "free" and db.locked == false end
+
+-- anchor a frame (the group, or a button on its own) the way the settings named by the prefix say; the frame already has its size
+local function place(f, pfx, side)
+	f:ClearAllPoints()
+	if modeOf(pfx) == "free" then
+		f:SetPoint(db[pfx .. "Point"] or "CENTER", UIParent, db[pfx .. "RelPoint"] or "CENTER",
+			clamp(db[pfx .. "X"], -3000, 3000, 0), clamp(db[pfx .. "Y"], -3000, 3000, -200))
+		return
+	end
+	local vertical = db.vertical and true or false
+	local align = db[pfx .. "Align"]
+	if align ~= "center" and align ~= "end" then align = "start" end
+	local pair = ns.sidePoints[side][align]
+	local edge = ns.edgeGap(side, "bar")
+	local x = side == "left" and -edge or (side == "right" and edge or 0)
+	local y = side == "top" and edge or (side == "bottom" and -edge or 0)
+	local rel = pair[2]
+	-- past the end of the bar, where a new totem lands: after all the places, not after the ones showing
+	local far = (not vertical and side == "right" and "right") or (vertical and side == "bottom" and "bottom")
+	if far then
+		rel = ns.farRel[far][align]
+		local full = MAX_SLOTS * db.size + (MAX_SLOTS - 1) * db.spacing
+		if far == "right" then x = x + full else y = y - full end
+	end
+	f:SetPoint(pair[1], ns.bar, rel, x + clamp(db[pfx .. "OffX"], -300, 300, 0), y + clamp(db[pfx .. "OffY"], -300, 300, 0))
+end
 
 -- ---------------------------------------------------------------- the buttons
 
@@ -195,7 +244,9 @@ local function newButton(kind, index)
 	b:SetScript("OnEnter", guard("call tooltip", tooltipOf))
 	b:SetScript("OnLeave", GameTooltip_Hide)
 	b:RegisterForDrag("LeftButton")
-	b:SetScript("OnDragStart", function() ns.callStartMove() end)
+	b:SetMovable(true)
+	b:SetClampedToScreen(true)
+	b:SetScript("OnDragStart", function() ns.callStartMove(kind) end)
 	b:SetScript("OnDragStop", function() ns.callStopMove() end)
 	b:EnableMouse(false)
 	b:Hide()
@@ -382,39 +433,55 @@ local function arm(b, name)
 	b:SetAttribute("spell1", name)
 end
 
--- moving the group by hand (its own place, frames unlocked): out of combat only, like the bar; a drag that really started
--- is finished and saved, one that never did saves nothing, and a fight that begins mid-drag finishes it when it ends
-local moving = false
-function ns.callStartMove()
-	if dragging() and not InCombatLockdown() and S.group then
-		S.group:StartMoving()
-		moving = true
-	end
+-- moving by hand (its own place, frames unlocked): the group, or a button placed on its own. Out of combat only, like the
+-- bar; a drag that really started is finished and saved, one that never did saves nothing, and a fight that begins
+-- mid-drag finishes it when it ends
+local moving
+function ns.callStartMove(kind)
+	if InCombatLockdown() or not S.group then return end
+	local pfx = pfxOf(kind)
+	if not dragging(pfx) then return end
+	local f = pfx == "call" and S.group or S.buttons[kind]
+	if not f then return end
+	f:StartMoving()
+	moving = { f = f, pfx = pfx }
 end
 local function finishMove()
-	moving = false
-	S.group:StopMovingOrSizing()
-	local p, _, rp, x, y = S.group:GetPoint()
-	db.callPoint, db.callRelPoint, db.callX, db.callY = p, rp, x, y
+	local m = moving
+	moving = nil
+	m.f:StopMovingOrSizing()
+	local p, rel, rp, x, y = m.f:GetPoint()
+	if m.pfx ~= "call" and rel ~= UIParent then
+		-- a button is a child of the group: take where it ended up on the screen instead
+		local ok, cx, cy = pcall(m.f.GetCenter, m.f)
+		local ok2, ux, uy = pcall(UIParent.GetCenter, UIParent)
+		if ok and ok2 and cx and ux then p, rp, x, y = "CENTER", "CENTER", cx - ux, cy - uy end
+	end
+	db[m.pfx .. "Point"], db[m.pfx .. "RelPoint"], db[m.pfx .. "X"], db[m.pfx .. "Y"] = p, rp, x, y
 end
 function ns.callStopMove()
 	if not moving or InCombatLockdown() then return end   -- finished by PLAYER_REGEN_ENABLED
 	finishMove()
 end
 
--- back to the usual spot
-function ns.callResetPlace()
-	local d = ns.defaults
-	db.callSide, db.callAlign, db.callOffX, db.callOffY = d.callSide, d.callAlign, d.callOffX, d.callOffY
-	db.callPoint, db.callRelPoint, db.callX, db.callY = d.callPoint, d.callRelPoint, d.callX, d.callY
+-- back to the usual spot (the group's, or one button's)
+function ns.callResetPlace(kind)
+	local d, k = ns.defaults, kind and POS[kind] or "call"
+	for _, f in ipairs({ "Side", "Align", "OffX", "OffY", "Point", "RelPoint", "X", "Y" }) do db[k .. f] = d[k .. f] end
 	ns.callApply()
 end
 
 -- everything that decides what is drawn: when none of it changed, a pass has nothing to do
+local SIG_FIELDS = { "Anchor", "Side", "Align", "OffX", "OffY", "Point", "RelPoint", "X", "Y" }
 local function signature(kinds, side)
-	local parts = { tostring(db.callShow), tostring(db.callScale), tostring(db.callAnchor), tostring(db.callSide), tostring(db.callAlign),
-		tostring(db.callOffX), tostring(db.callOffY), tostring(db.callPoint), tostring(db.callRelPoint), tostring(db.callX), tostring(db.callY),
+	local parts = { tostring(db.callShow), tostring(db.callScale),
 		tostring(db.size), tostring(db.spacing), tostring(db.vertical), tostring(db.locked), tostring(side), tostring(visibleNow()) }
+	for _, pfx in ipairs({ "call", "posCall", "posTotemic", "posRecall" }) do
+		for _, f in ipairs(SIG_FIELDS) do parts[#parts + 1] = tostring(db[pfx .. f]) end
+	end
+	for _, kind in ipairs({ "call", "totemic", "recall" }) do
+		parts[#parts + 1] = kind .. tostring(db[POS[kind] .. "Own"]) .. tostring((sideFor(POS[kind])))
+	end
 	for _, k in ipairs(kinds) do parts[#parts + 1] = k[1] .. ":" .. k[2].id .. ":" .. tostring(spellName(k[2].id, k[2].label)) end
 	return table.concat(parts, "|")
 end
@@ -443,8 +510,8 @@ local function apply()
 	local s, gap = buttonSize(), clamp(db.spacing, 0, 24, 4)
 	local vertical = db.vertical and true or false
 	local show = visibleNow()
-	local drag = dragging()
-	local on = {}
+	local on, grouped = {}, 0
+	S.ownSide, S.ownMoved = {}, {}
 	for i, k in ipairs(kinds) do
 		local kind, sp = k[1], k[2]
 		on[kind] = true
@@ -454,10 +521,19 @@ local function apply()
 		b:SetSize(s, s)
 		b.border:SetSize(s * 66 / 36, s * 66 / 36)
 		b.icon:SetTexture(spellTexture(sp.id))
-		b:ClearAllPoints()
-		local off = (i - 1) * (s + gap)
-		if vertical then b:SetPoint("TOPLEFT", S.group, "TOPLEFT", 0, -off) else b:SetPoint("TOPLEFT", S.group, "TOPLEFT", off, 0) end
-		arm(b, (not drag) and name or nil)                -- a press that starts a drag must not cast
+		local pfx = pfxOf(kind)
+		if pfx == "call" then
+			grouped = grouped + 1
+			local off = (grouped - 1) * (s + gap)
+			b:ClearAllPoints()
+			if vertical then b:SetPoint("TOPLEFT", S.group, "TOPLEFT", 0, -off) else b:SetPoint("TOPLEFT", S.group, "TOPLEFT", off, 0) end
+		else
+			local bside, bmoved = sideFor(pfx)
+			if modeOf(pfx) == "free" then bmoved = false end
+			S.ownSide[kind], S.ownMoved[kind] = bside, bmoved
+			place(b, pfx, bside)
+		end
+		arm(b, (not dragging(pfx)) and name or nil)       -- a press that starts a drag must not cast
 		b:EnableMouse(show)
 		b:Show()
 	end
@@ -472,31 +548,12 @@ local function apply()
 	S.shown = {}
 	for _, k in ipairs(kinds) do S.shown[#S.shown + 1] = k[1] end
 
-	-- the group: as long as the buttons
+	-- the group: as long as the buttons that are in it
 	local n = #kinds
 	local g = S.group
-	local long = math.max(n, 1) * s + math.max(n - 1, 0) * gap
+	local long = math.max(grouped, 1) * s + math.max(grouped - 1, 0) * gap
 	if vertical then g:SetSize(s, long) else g:SetSize(long, s) end
-	g:ClearAllPoints()
-	if mode() == "free" then
-		g:SetPoint(db.callPoint or "CENTER", UIParent, db.callRelPoint or "CENTER", clamp(db.callX, -3000, 3000, 0), clamp(db.callY, -3000, 3000, -200))
-	else
-		local align = db.callAlign
-		if align ~= "center" and align ~= "end" then align = "start" end
-		local pair = ns.sidePoints[side][align]
-		local edge = ns.edgeGap(side, "bar")
-		local x = side == "left" and -edge or (side == "right" and edge or 0)
-		local y = side == "top" and edge or (side == "bottom" and -edge or 0)
-		local rel = pair[2]
-		-- past the end of the bar, where a new totem lands: after all the places, not after the ones showing
-		local far = (not vertical and side == "right" and "right") or (vertical and side == "bottom" and "bottom")
-		if far then
-			rel = ns.farRel[far][align]
-			local full = MAX_SLOTS * db.size + (MAX_SLOTS - 1) * db.spacing
-			if far == "right" then x = x + full else y = y - full end
-		end
-		g:SetPoint(pair[1], ns.bar, rel, x + clamp(db.callOffX, -300, 300, 0), y + clamp(db.callOffY, -300, 300, 0))
-	end
+	place(g, "call", side)
 	g:SetShown(n > 0 and show)
 
 	-- the arrow: only on the Call button, and only when there is something to choose

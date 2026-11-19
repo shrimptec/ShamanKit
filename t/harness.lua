@@ -1643,6 +1643,88 @@ do
 	check(db.callPoint == "CENTER" and db.callX == 0 and db.callY == -200 and db.callSide == "start" and db.callOffX == 0 and db.callAnchor == "free", "calls: reset puts the place, the side and the nudge back (not the choice of own place)")
 	db.callAnchor = "bar"; ns.callApply()
 
+	-- each button on its own: the same settings again, one set per button
+	do
+		local function reset2()
+			db.callSide, db.callAlign, db.callAnchor, db.callOffX, db.callOffY = "start", "start", "bar", 0, 0
+			for _, k in ipairs({ "posCall", "posTotemic", "posRecall" }) do
+				for _, f in ipairs({ "Own", "Anchor", "Side", "Align", "OffX", "OffY", "Point", "RelPoint", "X", "Y" }) do db[k .. f] = ns.defaults[k .. f] end
+			end
+			db.shieldOn = false; db.weaponOn = false; db.callOn = true; db.callTotemic = true; db.callRecall = true
+			ns.callApply()
+		end
+		reset2()
+		check(ns.defaults.posTotemicOwn == false and ns.defaults.posCallY == -200 and ns.defaults.posTotemicY == -250 and ns.defaults.posRecallY == -300, "calls own: nobody is on their own until you say so, and own places differ so they don't pile up")
+		check(S.group.w == 3 * 36 + 2 * 4, "calls own: all together to begin with")
+		-- Totemic Call on its own: the group closes up around the other two
+		db.posTotemicOwn = true; ns.callApply()
+		check(S.group.w == 2 * 36 + 4 and b1.anchor[4] == 0 and b3.anchor[4] == 40 and b3.anchor[2] == S.group, "calls own: the one placed on its own leaves the group, the others close up")
+		check(b2.anchor[1] == "TOPRIGHT" and b2.anchor[2] == bar2 and b2.anchor[3] == "TOPLEFT" and b2.anchor[4] == -6, "calls own: it sits at the bar by its own settings (left, start)")
+		db.posTotemicSide = "right"; db.posTotemicAlign = "end"; ns.callApply()
+		check(b2.anchor[1] == "BOTTOMLEFT" and b2.anchor[3] == "BOTTOMLEFT" and b2.anchor[4] == full + 6, "calls own: its side and alignment are its own")
+		check(S.group.anchor[1] == "TOPRIGHT" and S.group.anchor[3] == "TOPLEFT", "calls own: and the group's are not touched")
+		db.posTotemicOffX, db.posTotemicOffY = 7, -3; ns.callApply()
+		check(b2.anchor[4] == full + 13 and b2.anchor[5] == -3, "calls own: its own nudge")
+		db.posTotemicAnchor = "free"; db.posTotemicPoint, db.posTotemicRelPoint, db.posTotemicX, db.posTotemicY = "TOP", "TOP", 50, -60; ns.callApply()
+		check(b2.anchor[1] == "TOP" and b2.anchor[2] == UIParent and b2.anchor[4] == 50 and b2.anchor[5] == -60, "calls own: or a place of its own on the screen")
+		db.posTotemicX = "far"; ns.callApply()
+		check(b2.anchor[4] == 0, "calls own: a damaged number falls back")
+		db.posTotemicX = 50
+		-- the buff icons on its side: it takes the opposite one, and says so
+		db.posTotemicAnchor = "bar"; db.posTotemicSide = "left"; db.shieldOn = true; db.auxAnchor = "bar"; db.auxSide = "left"; ns.callApply()
+		check(S.ownSide.totemic == "right" and S.ownMoved.totemic == true and b2.anchor[3] == "BOTTOMLEFT", "calls own: the buff icons on its side: it takes the opposite one")
+		db.posTotemicAnchor = "free"; ns.callApply()
+		check(S.ownMoved.totemic == false, "calls own: in its own place nothing is in the way")
+		db.shieldOn = false; db.auxSide = "auto"
+		-- showing follows the same rule as the others
+		db.callShow = "bar"; ns.callApply()
+		check(S.group.shown == false and b2.mouse == false, "calls own: 'only while a totem is out': the one on its own goes too")
+		db.callShow = "always"; ns.callApply()
+		check(b2.shown == true and b2.mouse == true and S.group.shown == true, "calls own: ...and comes back")
+		-- when only buttons on their own are on, the group still shows them
+		db.callOn = false; db.callRecall = false; ns.callApply()
+		check(b2.shown and S.group.shown, "calls own: only buttons on their own: they still show")
+		db.callOn = true; db.callRecall = true; ns.callApply()
+		-- dragging a button on its own
+		local st, sp = 0, 0
+		local oS, oP = b2.StartMoving, b2.StopMovingOrSizing
+		rawset(b2, "StartMoving", function() st = st + 1 end)
+		rawset(b2, "StopMovingOrSizing", function() sp = sp + 1 end)
+		rawset(b2, "GetCenter", function() return 1000, 300 end)
+		rawset(UIParent, "GetCenter", function() return 960, 540 end)
+		b2.scripts.OnDragStart(b2)
+		check(st == 0, "calls own drag: locked: no drag")
+		db.locked = false; ns.callApply()
+		check(b2.attrs.spell1 == nil and b1.attrs.spell1 == "Call of the Elements" and b3.attrs.spell1 == "Totemic Recall", "calls own drag: unlocked: only the one in its own place is disarmed")
+		b1.scripts.OnDragStart(b1)
+		check(st == 0 and (not S.group.moved), "calls own drag: a grouped button does not drag (the group is attached)")
+		b2.scripts.OnDragStart(b2); b2.scripts.OnDragStop(b2)
+		check(st == 1 and sp == 1 and db.posTotemicPoint == "CENTER" and db.posTotemicRelPoint == "CENTER" and db.posTotemicX == 40 and db.posTotemicY == -240, "calls own drag: saved as its distance from the screen's middle")
+		check(db.callX == 0 and db.callPoint == "CENTER", "calls own drag: the group's place is left alone")
+		inCombat = true
+		b2.scripts.OnDragStart(b2)
+		check(st == 1, "calls own drag: not in a fight")
+		inCombat = false
+		rawset(b2, "StartMoving", oS); rawset(b2, "StopMovingOrSizing", oP); rawset(b2, "GetCenter", nil); rawset(UIParent, "GetCenter", nil)
+		db.locked = true; ns.callApply()
+		-- the reset button of one button only
+		db.posTotemicSide = "right"; db.callSide = "right"
+		ns.callResetPlace("totemic")
+		check(db.posTotemicSide == "start" and db.posTotemicY == -250 and db.posTotemicOwn == true and db.callSide == "right", "calls own: reset puts that button's place back and nothing else")
+		db.callSide = "start"
+		-- fight: its place and its box are held like the rest
+		local w2 = 0
+		for _, b in ipairs({ b1, b2, b3 }) do local o = b.SetPoint; rawset(b, "SetPoint", function(...) w2 = w2 + 1; return o(...) end) end
+		inCombat = true; AURAS_HIDDEN = true; cfire("PLAYER_REGEN_DISABLED")
+		db.posTotemicOwn = false; db.posRecallOwn = true; db.posTotemicSide = "top"
+		local okp = pcall(function() ns.updatePreview(); ns.callApply() end)
+		check(okp and w2 == 0 and b2.anchor[2] == UIParent, "calls own fight: moving buttons between places waits for the fight to end")
+		inCombat = false; AURAS_HIDDEN = false; cfire("PLAYER_REGEN_ENABLED"); runTimers()
+		check(w2 > 0 and S.group.w == 2 * 36 + 4 and b3.anchor[2] ~= S.group, "calls own fight: ...and is done after it")
+		for _, b in ipairs({ b1, b2, b3 }) do rawset(b, "SetPoint", nil) end
+		reset2()
+	end
+
 	-- a fight: none of the secure buttons or their group is touched (the game would refuse and show a popup)
 	local writes = 0
 	for _, b in ipairs({ b1, b2, b3 }) do
@@ -1711,7 +1793,7 @@ do
 	-- the radio groups, in the order the page makes them: show (2), attach (2), side (5), align (3)
 	local rb = {}
 	for _, f in ipairs(frames) do if type(f.value) == "string" and f.parentFrame == page and f.scripts.OnClick then rb[#rb + 1] = f end end
-	check(#rb == 12, "calls settings: twelve radio choices (" .. #rb .. ")")
+	check(#rb == 16, "calls settings: sixteen radio choices (" .. #rb .. ")")
 	local function pick(i) rb[i].scripts.OnClick(rb[i]) end
 	pick(2)
 	check(db.callShow == "bar", "calls settings: 'only while a totem is out'")
@@ -1741,11 +1823,11 @@ do
 	local sl = {}
 	for _, f in ipairs(frames) do if f.kind == "Slider" and f.parentFrame == page then sl[#sl + 1] = f end end
 	check(#sl == 5, "calls settings: five sliders: size, two nudges, two screen positions (" .. #sl .. ")")
-	check(sl[2].enabled == false and sl[3].enabled == false and sl[4].enabled ~= false and sl[5].enabled ~= false, "calls settings: own place: nudges greyed, screen position on")
+	check(sl[2].shown == false and sl[3].shown == false and sl[4].shown ~= false and sl[5].shown ~= false, "calls settings: own place: the nudges give way to the screen position")
 	local unlockBox = boxFor("locked")
 	check(unlockBox and unlockBox.enabled ~= false, "calls settings: own place: the unlock box is on")
 	db.callAnchor = "bar"; rb[3].scripts.OnClick(rb[3])
-	check(rb[6].enabled == true and sl[2].enabled == true and sl[4].enabled == false and unlockBox.enabled == false, "calls settings: attached: the reverse")
+	check(rb[6].enabled == true and sl[2].shown ~= false and sl[4].shown == false and unlockBox.enabled == false, "calls settings: attached: the reverse")
 	sl[1]:SetValue(70)
 	check(db.callScale == 70 and b1.w == 25, "calls settings: the size slider resizes the buttons (" .. tostring(b1.w) .. ")")
 	sl[2]:SetValue(12); sl[3]:SetValue(-8)
@@ -1762,6 +1844,44 @@ do
 	check(resetBtn ~= nil, "calls settings: a reset button")
 	db.callX = 777; resetBtn.scripts.OnClick(resetBtn)
 	check(db.callX == 0 and db.callY == -200, "calls settings: reset puts the place back")
+	-- the picker on the page: which button the position controls are for
+	do
+		local function isOn(i) return rb[i].checked end
+		db.callAnchor = "bar"; db.callSide = "start"; ns.callTarget = "all"; page.OnRefresh()
+		check(isOn(13) and not isOn(14), "calls settings: the picker starts on 'All together'")
+		local ownBox2 = boxFor("posCallOwn")
+		check(ownBox2 ~= nil and ownBox2.shown == false, "calls settings: all together: no 'on its own' box")
+		pick(15)
+		check(ns.callTarget == "totemic" and isOn(15) and not isOn(13), "calls settings: picking a button")
+		check(ownBox2.shown ~= false and ownBox2.checked == false and rb[6].enabled == false and rb[9].enabled == false and sl[2].enabled == false, "calls settings: a button with the others: its box is off and its place controls are greyed")
+		db.posTotemicOwn = false
+		ownBox2:SetChecked(true); ownBox2.scripts.OnClick(ownBox2)
+		check(db.posTotemicOwn == true and rb[6].enabled == true and rb[9].enabled == true, "calls settings: ticking it gives the button a place of its own")
+		pick(9)
+		check(db.posTotemicSide == "right" and db.callSide ~= "right", "calls settings: the side controls write that button's settings, not the group's")
+		check(rb[9].checked == true, "calls settings: and show them")
+		sl[2]:SetValue(15)
+		check(db.posTotemicOffX == 15 and db.callOffX ~= 15, "calls settings: the nudge slider too")
+		pick(4)
+		check(db.posTotemicAnchor == "free" and db.callAnchor == "bar", "calls settings: and 'own place'")
+		sl[4]:SetValue(100); sl[5]:SetValue(-50)
+		check(db.posTotemicX == 100 and db.posTotemicY == -50 and db.callX ~= 100, "calls settings: and the screen position")
+		check(sl[4].shown ~= false and sl[2].shown == false, "calls settings: own place: the screen sliders show")
+		pick(14)
+		check(ns.callTarget == "call" and ownBox2.checked == false and sl[4].shown == false, "calls settings: another button: its own settings are shown (attached, nothing on its own)")
+		pick(16); pick(13)
+		check(ns.callTarget == "all" and rb[3].checked == true, "calls settings: back to all together: the group's settings")
+		-- reset on the page for one button
+		pick(15)
+		resetBtn.scripts.OnClick(resetBtn)
+		check(db.posTotemicX == 0 and db.posTotemicY == -250 and db.posTotemicOwn == true, "calls settings: 'reset' with a button picked resets that button")
+		pick(13)
+		-- Defaults restores the per-button settings too
+		db.posRecallOwn = true; db.posRecallSide = "top"; db.posTotemicOwn = true
+		page.OnDefault()
+		check(db.posRecallOwn == false and db.posRecallSide == "start" and db.posTotemicOwn == false and db.posTotemicAnchor == "bar", "calls settings: Defaults restores every button's own settings")
+		ns.callTarget = "all"
+	end
 	db.callTotemic = true; db.callRecall = true; db.callChoice = CA; db.callSide = "end"; db.callShow = "bar"; db.callScale = 120
 	db.callAnchor = "free"; db.callAlign = "end"; db.callOffX = 9
 	page.OnDefault()
