@@ -492,10 +492,28 @@ local function signature(kinds, side)
 	return table.concat(parts, "|")
 end
 
+-- Log what the Call buttons decide and why (information only), once per change: a button that stays on screen with no totem
+-- out has to be explainable from the log. "wants" is what the settings and the bar say, "is" what is on screen.
+local function reason()
+	return ("barUp=%s optionsOpen=%s moveMode=%s callShow=%s combat=%s"):format(tostring(ns.barUp and ns.barUp()),
+		tostring(ns.optionsOpen), tostring(ns.moveMode), tostring(db.callShow), tostring(InCombatLockdown()))
+end
+local function watch(where)
+	local g = S.group
+	if not g then return end
+	local is = g:IsShown() and true or false
+	local wants = ((S.shown and #S.shown > 0) and visibleNow()) and true or false
+	local key = tostring(is) .. tostring(wants)
+	if key == S.watchKey then return end
+	S.watchKey = key
+	if is == wants then dbg("CALLS group %s (%s) | %s", is and "on screen" or "hidden", where, reason())
+	else dbg("CALLS group IS %s but WANTS %s (%s) | %s", is and "on screen" or "hidden", wants and "on screen" or "hidden", where, reason()) end
+end
+
 -- the whole pass: which buttons, what they cast, how big, where they sit, whether they are on screen
 local function apply()
 	if not db then return end
-	if InCombatLockdown() then S.pending = true return end
+	if InCombatLockdown() then S.pending = true watch("waiting for the end of the fight") return end
 	S.pending = false
 	if not ensure() then return end
 	S.choices = knownCalls()
@@ -510,7 +528,7 @@ local function apply()
 	if mode() == "free" then moved = false end         -- no bar to sit beside: nothing to get out of the way of
 	S.side, S.sideMoved = side, moved
 	local sig = signature(kinds, side) .. "|" .. #S.choices
-	if sig == S.sig then ns.callPaintCooldowns() return end
+	if sig == S.sig then watch("nothing changed") ns.callPaintCooldowns() return end
 	S.sig = sig
 
 	local s, gap = buttonSize(), clamp(db.spacing, 0, 24, 4)
@@ -562,6 +580,7 @@ local function apply()
 	if vertical then g:SetSize(s, long) else g:SetSize(long, s) end
 	place(g, "call", side)
 	g:SetShown(n > 0 and show)
+	watch("applied")
 
 	-- the arrow: only on the Call button, and only when there is something to choose
 	local arrow, cb = S.arrow, S.buttons.call

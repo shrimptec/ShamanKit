@@ -1614,9 +1614,12 @@ do
 	totems[2] = nil
 	pcall(fire, "PLAYER_TOTEM_UPDATE", 2)
 	check(S.group.shown == true and gw == 1, "calls show fight: the totem expiring in a fight: the buttons stay until it is over")
+	local function callLog(pat) for _, l in ipairs(ShamanKitLogDB.lines) do if l:find(pat) then return l end end end
+	check(callLog("CALLS group IS on screen but WANTS hidden %(waiting for the end of the fight%)") ~= nil, "calls log: a button that has to wait for the end of the fight says so")
 	inCombat = false
 	cfire("PLAYER_REGEN_ENABLED"); fire("PLAYER_REGEN_ENABLED"); runTimers()
 	check(S.group.shown == false, "calls show fight: ...then they go")
+	check(callLog("CALLS group hidden %(applied%) | barUp=false") ~= nil, "calls log: ...and the log says they are hidden, and why")
 	rawset(S.group, "SetShown", nil)
 	db.callShow = "always"; ns.callApply()
 	check(S.group.shown == true, "calls show: back to all the time")
