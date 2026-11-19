@@ -119,13 +119,6 @@ function GetTotemInfo(slot)
 	return true, d.name, d.start, d.dur, d.icon
 end
 local auras = {}
-PLAYER_GUID = "Player-1-ABC"
-function UnitGUID() return "Player-1-ABC" end
-CLEU = nil             -- what the combat log says right now: { sub, destGUID, spellName, amount } (or { secret = true })
-function CombatLogGetCurrentEventInfo()
-	if CLEU.secret then return 1, secret(), false, "x", "n", 0, 0, secret(), "me", 0, 0, 324, secret() end
-	return 1, CLEU.sub, false, "x", "n", 0, 0, CLEU.dest or "Player-1-ABC", "me", 0, 0, 324, CLEU.nameSecret and secret() or CLEU.name or "Lightning Shield", 8, "BUFF", CLEU.amount
-end
 AURAS_HIDDEN = false   -- a fight: the game hides auras
 IDAURAS = {}           -- what a lookup by spell id still answers while they are hidden
 C_Secrets = { ShouldAurasBeSecret = function() return AURAS_HIDDEN end }
@@ -135,15 +128,36 @@ C_UnitAuras = {
 		if AURAS_HIDDEN then return nil end     -- seen in the real log: "nothing", not a secret, even though the aura is there
 		return auras[name]
 	end,
-	-- in a fight the game still answers for an aura you already know by instance id (IDAURAS), and a scan finds it too
-	GetAuraDataByAuraInstanceID = function(_, id) return IDAURAS[id] end,
+	-- in a fight (proved by the real log) the data lookups all answer nothing: by name, by id, by index.
+	-- Still answered: the list of buff ids (plain numbers) and the count text (a string the addon can't read).
+	GetAuraDataByAuraInstanceID = function(_, id) if AURAS_HIDDEN then return nil end return IDAURAS[id] end,
 	GetAuraDataByIndex = function(_, i)
+		if AURAS_HIDDEN then return nil end
 		local list = {}
 		for _, d in pairs(IDAURAS) do list[#list + 1] = d end
 		table.sort(list, function(a, b) return a.auraInstanceID < b.auraInstanceID end)
 		return list[i]
 	end,
+	GetUnitAuraInstanceIDs = function()
+		if IDLIST_FAILS then error("blocked") end
+		local list = {}
+		for id in pairs(IDAURAS) do list[#list + 1] = id end
+		for _, id in ipairs(EXTRA_IDS or {}) do list[#list + 1] = id end
+		table.sort(list)
+		return list
+	end,
+	GetAuraApplicationDisplayCount = function(_, id, minCount, maxCount)
+		local d = IDAURAS[id]
+		if not d then error("invalid aura instance") end
+		CALLED_COUNT = { id = id, min = minCount, max = maxCount }
+		if COUNT_SECRET then return secret() end
+		local n = d.applications or 0
+		if n < (minCount or 2) then return "" end
+		if n > (maxCount or 99) then return "*" end
+		return tostring(n)
+	end,
 }
+
 
 local savedCat
 local allCats = {}
@@ -989,7 +1003,7 @@ do
 	local want = { UNIT_AURA = true, UNIT_INVENTORY_CHANGED = true, PLAYER_EQUIPMENT_CHANGED = true }
 	local known = { ADDON_LOADED = true, PLAYER_ENTERING_WORLD = true, PLAYER_TOTEM_UPDATE = true, UNIT_SPELLCAST_SUCCEEDED = true,
 		PLAYER_REGEN_DISABLED = true, PLAYER_REGEN_ENABLED = true, ADDON_ACTION_BLOCKED = true, ADDON_ACTION_FORBIDDEN = true,
-		UNIT_AURA = true, UNIT_INVENTORY_CHANGED = true, PLAYER_EQUIPMENT_CHANGED = true, COMBAT_LOG_EVENT_UNFILTERED = true }
+		UNIT_AURA = true, UNIT_INVENTORY_CHANGED = true, PLAYER_EQUIPMENT_CHANGED = true }
 	local seen, unknown = {}, nil
 	for _, n in ipairs(REGISTERED) do seen[n] = true; if not known[n] then unknown = n end end
 	check(seen.UNIT_AURA and seen.UNIT_INVENTORY_CHANGED and seen.PLAYER_EQUIPMENT_CHANGED, "icons: the three events are registered")
@@ -1174,126 +1188,92 @@ do
 		noErrors("weapon mode: no error in the log")
 	end
 
-	-- THE REPORTED BUGS: (1) the icon vanished at every fight start, (2) then it said "charges can't be read" instead of
-	-- behaving like the normal buff icon. In a fight the lookup by name says "nothing"; the aura is followed by instance id.
+	-- THE REPORTED BUGS: the icon vanished at every fight start; then "can't be read"; then stuck on 3 until the fight ended.
+	-- What the real log proved: in a fight the name, id and scan lookups all answer nothing. Still answered: the list of
+	-- buff ids, and the count text (a string the addon can't read).
 	do
-		secretPos = false; AURAS_HIDDEN = false; IDAURAS = {}; db.shieldOn = true; inCombat = false; ShamanKitDB.log = {}
-		local live = { applications = 3, auraInstanceID = 77, spellId = 324 }
-		auras["Lightning Shield"] = live; IDAURAS[77] = live; fire("UNIT_AURA", "player")
+		secretPos = false; AURAS_HIDDEN = false; IDAURAS = {}; EXTRA_IDS = {}; COUNT_SECRET = false; IDLIST_FAILS = false
+		db.shieldOn = true; inCombat = false; ShamanKitDB.log = {}
+		local live = { applications = 3, auraInstanceID = 353, spellId = 945 }
+		auras["Lightning Shield"] = live; IDAURAS[353] = live; fire("UNIT_AURA", "player")
 		check(S().shown and S().count.text == "3", "fight test: shield up out of combat, 3 charges")
-		AURAS_HIDDEN = true; inCombat = true; auras["Lightning Shield"] = nil   -- from here a lookup by name says "nothing"
+		AURAS_HIDDEN = true; inCombat = true; auras["Lightning Shield"] = nil   -- from here every data lookup says nothing
 		fire("PLAYER_REGEN_DISABLED")
-		check(S().shown and S().count.text == "3", "REPORTED BUG: the fight starts: the icon STAYS and shows the real number, like the normal buff icon")
-		check(S().count.color and S().count.color[1] == 1 and S().count.color[2] == 1, "...in the normal white, no warning colour")
-		live.applications = 2; fire("UNIT_AURA", "player", { updatedAuraInstanceIDs = { 77 } })
-		check(S().shown and S().count.text == "2", "a charge is used in the fight: 2, live")
-		live.applications = 1; fire("UNIT_AURA", "player", { updatedAuraInstanceIDs = { 77 } })
-		check(S().count.text == "1", "...1, live")
-		for _ = 1, 5 do second() end
-		check(S().shown and S().count.text == "1", "polls in the fight keep it")
+		check(S().shown and S().count.text == "3" and S().count.color[1] == 1, "the fight starts: the icon STAYS, 3, white (read live, not remembered)")
+		check(CALLED_COUNT and CALLED_COUNT.id == 353 and CALLED_COUNT.min == 1 and CALLED_COUNT.max == 99, "the game's count text is asked for with a minimum of 1, so '1' shows")
+		live.applications = 2; fire("UNIT_AURA", "player")
+		check(S().shown and S().count.text == "2", "REPORTED BUG: a charge is used in the fight: 2, live (it was stuck on 3)")
+		live.applications = 1; second()
+		check(S().count.text == "1", "...1, live (polls follow it too)")
+		check(S().count.color[1] == 1, "...white, no warning colour")
 		check(not tostring(S().tipLine):find("can't be read"), "no 'can't be read' text anywhere")
 		local seen
-		for _, l in ipairs(ShamanKitDB.log or {}) do if l:find("SHIELD auras hidden") then seen = l end end
-		check(seen ~= nil and seen:find("instance id"), "the log says the route used in the fight")
-		local listed
-		for _, l in ipairs(ShamanKitDB.log or {}) do if l:find("C_UnitAuras has") then listed = true end end
-		check(listed, "the log lists which aura calls this client has")
-		-- the last charge is used and the aura goes: the game says so by instance id
-		IDAURAS[77] = nil; fire("UNIT_AURA", "player", { removedAuraInstanceIDs = { 77 } })
-		check(not S().shown, "the shield ends in the fight: the game says it was removed -> icon hidden at once")
-		-- instance id lookup refused, but a scan finds it (and a re-cast shield gets a new id)
+		for _, l in ipairs(ShamanKitDB.log) do if l:find("SHIELD auras hidden") then seen = l end end
+		check(seen ~= nil and seen:find("id=353") and seen:find("up"), "the log says what the game let us read (once per fight)")
+		local n = 0; for _, l in ipairs(ShamanKitDB.log) do if l:find("SHIELD auras hidden") then n = n + 1 end end
+		check(n == 1, "...once per fight, not once per message")
+		IDAURAS[353] = nil
+		fire("UNIT_AURA", "player")
+		check(not S().shown, "REPORTED BUG: the shield ends in the fight: the icon is gone at once, not at the end of the fight")
+		second(); check(not S().shown, "...and stays gone")
+		-- the count text is a hidden string: it is passed straight to the number, never read
 		AURAS_HIDDEN = false; inCombat = false; fire("PLAYER_REGEN_ENABLED")
-		local live2 = { applications = 3, auraInstanceID = 88, spellId = 324 }
-		auras["Lightning Shield"] = live2; fire("UNIT_AURA", "player")
+		local live2 = { applications = 3, auraInstanceID = 360, spellId = 945 }
+		auras["Lightning Shield"] = live2; IDAURAS[360] = live2; fire("UNIT_AURA", "player")
 		AURAS_HIDDEN = true; inCombat = true; auras["Lightning Shield"] = nil; fire("PLAYER_REGEN_DISABLED")
-		IDAURAS[88] = live2
-		local byId = C_UnitAuras.GetAuraDataByAuraInstanceID
-		C_UnitAuras.GetAuraDataByAuraInstanceID = function() return nil end
-		t = t + 1; live2.applications = 2; fire("UNIT_AURA", "player", { updatedAuraInstanceIDs = { 88 } })
-		check(S().shown and S().count.text == "2", "instance id refused: a scan of the buffs finds the same aura (2)")
-		C_UnitAuras.GetAuraDataByAuraInstanceID = byId
-		-- nothing readable at all: the icon stays with the last number, a little grey
-		t = t + 1; IDAURAS = {}; fire("UNIT_AURA", "player", {})
-		check(S().shown and S().count.text == "2", "nothing readable in the fight: icon and last number stay")
-		check(S().count.color[1] < 0.9, "...a little grey, so it is not claimed as live")
-		-- fight over: the real number at once
-		AURAS_HIDDEN = false; inCombat = false; auras["Lightning Shield"] = { applications = 1, auraInstanceID = 99, spellId = 324 }
+		COUNT_SECRET = true; second()
+		check(S().shown and S().count.text ~= "?" and S().count.color[1] == 1, "hidden count text: shown as is (no ?, white)")
+		COUNT_SECRET = false
+		-- a one-charge shield shows 1, an empty text shows nothing
+		live2.applications = 1; second(); check(S().count.text == "1", "1 charge left: shows 1")
+		live2.applications = 0; second(); check(S().shown and S().count.text == "", "the game says no count: the number is empty, the icon stays while the aura is on")
+		live2.applications = 2; second()
+		-- the buff list can't be read: the icon stays, the last number, a little grey
+		IDLIST_FAILS = true; second()
+		check(S().shown and S().count.text == "2" and S().count.color[1] < 0.9, "buff list refused: icon and last number stay, a little grey")
+		IDLIST_FAILS = false; second()
+		check(S().shown and S().count.text == "2" and S().count.color[1] == 1, "...and white again as soon as it answers")
+		-- a shield cast in the fight has an id nobody knows: nothing invented, the old one stays gone
+		-- fight over: the real reading again, new id remembered
+		AURAS_HIDDEN = false; inCombat = false
+		auras["Lightning Shield"] = { applications = 1, auraInstanceID = 361, spellId = 945 }; IDAURAS = { [361] = auras["Lightning Shield"] }
 		fire("PLAYER_REGEN_ENABLED")
-		check(S().shown and S().count.text == "1" and S().count.color[1] == 1, "fight over: the real number (1) is back at once, white")
-		-- no shield: hidden; and a fight does not invent one
-		auras["Lightning Shield"] = nil; fire("UNIT_AURA", "player")
-		check(not S().shown, "out of combat the shield is gone: icon hidden (a 'nothing' IS believed when auras are readable)")
-		AURAS_HIDDEN = true; inCombat = true; fire("PLAYER_REGEN_DISABLED"); second(); fire("UNIT_AURA", "player", {})
-		check(not S().shown, "no shield before the fight: still none during it")
+		check(S().shown and S().count.text == "1", "fight over: the real number (1) at once")
+		-- no shield before a fight: a fight does not invent one
+		auras["Lightning Shield"] = nil; IDAURAS = {}; fire("UNIT_AURA", "player")
+		check(not S().shown, "out of combat the shield is gone: icon hidden")
+		EXTRA_IDS = { 500, 501 }   -- other buffs
+		AURAS_HIDDEN = true; inCombat = true; fire("PLAYER_REGEN_DISABLED"); second(); fire("UNIT_AURA", "player")
+		check(not S().shown, "no shield before the fight: still none during it, whatever other buffs there are")
+		EXTRA_IDS = {}
 		AURAS_HIDDEN = false; inCombat = false; fire("PLAYER_REGEN_ENABLED")
-		-- a hidden-aura answer of an API that does not exist here: a fight is assumed to hide them
+		-- another buff with another id does not keep the icon up
+		local live3 = { applications = 3, auraInstanceID = 400, spellId = 945 }
+		auras["Lightning Shield"] = live3; IDAURAS[400] = live3; fire("UNIT_AURA", "player")
+		AURAS_HIDDEN = true; inCombat = true; auras["Lightning Shield"] = nil; fire("PLAYER_REGEN_DISABLED")
+		IDAURAS[400] = nil; EXTRA_IDS = { 401 }; second()
+		check(not S().shown, "the shield's id is gone while another buff came: the icon is gone")
+		EXTRA_IDS = {}
+		-- no ShouldAurasBeSecret on this client: a fight is assumed to hide the auras
+		AURAS_HIDDEN = false; inCombat = false; fire("PLAYER_REGEN_ENABLED")
 		local sec = C_Secrets; C_Secrets = nil
-		local live3 = { applications = 3, auraInstanceID = 5, spellId = 324 }
-		auras["Lightning Shield"] = live3; IDAURAS[5] = live3; fire("UNIT_AURA", "player")
-		inCombat = true; AURAS_HIDDEN = true; auras["Lightning Shield"] = nil; fire("PLAYER_REGEN_DISABLED")
-		check(S().shown and S().count.text == "3", "no ShouldAurasBeSecret on this client: a fight is still assumed to hide auras")
+		local live4 = { applications = 3, auraInstanceID = 410, spellId = 945 }
+		auras["Lightning Shield"] = live4; IDAURAS[410] = live4; fire("UNIT_AURA", "player")
+		inCombat = true; AURAS_HIDDEN = true; auras["Lightning Shield"] = nil; fire("PLAYER_REGEN_DISABLED"); live4.applications = 2; second()
+		check(S().shown and S().count.text == "2", "no ShouldAurasBeSecret on this client: a fight is still assumed to hide auras")
 		inCombat = false; AURAS_HIDDEN = false; fire("PLAYER_REGEN_ENABLED"); C_Secrets = sec
 		auras["Lightning Shield"] = nil; IDAURAS = {}; fire("UNIT_AURA", "player")
-		-- cost: a burst of messages in a fight does not look through the buffs every time
-		local live4 = { applications = 3, auraInstanceID = 6, spellId = 324 }
-		auras["Lightning Shield"] = live4; IDAURAS[6] = live4; fire("UNIT_AURA", "player")
-		AURAS_HIDDEN = true; inCombat = true; auras["Lightning Shield"] = nil; fire("PLAYER_REGEN_DISABLED")
-		local scans = 0; local gi = C_UnitAuras.GetAuraDataByIndex
-		C_UnitAuras.GetAuraDataByIndex = function(...) scans = scans + 1 return gi(...) end
-		C_UnitAuras.GetAuraDataByAuraInstanceID = function() return nil end
-		for _ = 1, 50 do fire("UNIT_AURA", "player", {}) end
-		check(scans < 12, "cost: 50 messages in one instant do not cause 50 scans (" .. scans .. ")")
-		C_UnitAuras.GetAuraDataByIndex = gi; C_UnitAuras.GetAuraDataByAuraInstanceID = byId
-		AURAS_HIDDEN = false; inCombat = false; fire("PLAYER_REGEN_ENABLED"); IDAURAS = {}
-		auras["Lightning Shield"] = nil; fire("UNIT_AURA", "player")
+		-- this client lacks the calls: the icon stays, grey
+		local g1, g2 = C_UnitAuras.GetUnitAuraInstanceIDs, C_UnitAuras.GetAuraApplicationDisplayCount
+		local live5 = { applications = 3, auraInstanceID = 420, spellId = 945 }
+		auras["Lightning Shield"] = live5; IDAURAS[420] = live5; fire("UNIT_AURA", "player")
+		C_UnitAuras.GetUnitAuraInstanceIDs, C_UnitAuras.GetAuraApplicationDisplayCount = nil, nil
+		AURAS_HIDDEN = true; inCombat = true; auras["Lightning Shield"] = nil; fire("PLAYER_REGEN_DISABLED"); second()
+		check(S().shown and S().count.text == "3" and S().count.color[1] < 0.9, "calls missing on this client: icon and last number stay, grey")
+		C_UnitAuras.GetUnitAuraInstanceIDs, C_UnitAuras.GetAuraApplicationDisplayCount = g1, g2
+		AURAS_HIDDEN = false; inCombat = false; fire("PLAYER_REGEN_ENABLED")
+		auras["Lightning Shield"] = nil; IDAURAS = {}; fire("UNIT_AURA", "player")
 		noErrors("fight test: no error in the log")
-	end
-
-	-- ---- the combat log route: in a fight the aura can't be read at all (the real log: id and scan both say nothing)
-	do
-		secretPos = false; AURAS_HIDDEN = false; IDAURAS = {}; db.shieldOn = true; inCombat = false; ShamanKitDB.log = {}
-		local function clog(sub, amount, name, dest) CLEU = { sub = sub, amount = amount, name = name, dest = dest }; ns.cl.scripts.OnEvent(ns.cl, "COMBAT_LOG_EVENT_UNFILTERED") end
-		auras["Lightning Shield"] = { applications = 3, auraInstanceID = 353, spellId = 945 }; fire("UNIT_AURA", "player")
-		check(S().shown and S().count.text == "3", "log route: shield up, 3 charges")
-		check(ns.cl.registered and ns.cl.registered.COMBAT_LOG_EVENT_UNFILTERED, "log route: listening to the combat log while the shield icon is on")
-		AURAS_HIDDEN = true; inCombat = true; auras["Lightning Shield"] = nil   -- everything unreadable, as in the real log
-		fire("PLAYER_REGEN_DISABLED")
-		check(S().shown and S().count.color[1] < 0.9, "fight starts, combat log not heard yet: the number is grey (not claimed as live)")
-		clog("SWING_DAMAGE")
-		clog("SPELL_AURA_REMOVED_DOSE", 2)
-		check(S().shown and S().count.text == "2" and S().count.color[1] == 1, "REPORTED BUG: a charge is used: 2, white, live")
-		clog("SPELL_AURA_REMOVED_DOSE", 1)
-		check(S().count.text == "1", "a charge is used: 1")
-		clog("SPELL_AURA_REMOVED_DOSE", 0, "Rockbiter Weapon"); check(S().count.text == "1", "another spell's aura is ignored")
-		clog("SPELL_AURA_REMOVED_DOSE", 0, nil, "Creature-9"); check(S().count.text == "1", "an aura on someone else is ignored")
-		clog("SPELL_DAMAGE"); check(S().shown and S().count.text == "1", "other combat log events change nothing")
-		for _ = 1, 4 do second() end
-		check(S().shown and S().count.text == "1", "polls in the fight do not undo it")
-		clog("SPELL_AURA_REMOVED")
-		check(not S().shown, "REPORTED BUG: the shield ends in the fight: icon gone at once, not at the end of the fight")
-		clog("SPELL_AURA_APPLIED", 3)
-		check(S().shown and S().count.text == "3", "shield cast again in the fight: back with 3 (the game would not let us read it)")
-		clog("SPELL_AURA_REFRESH", 3); check(S().shown and S().count.text == "3", "refresh: 3")
-		clog("SPELL_AURA_APPLIED_DOSE", 2); check(S().count.text == "2", "dose applied: 2")
-		clog("SPELL_HEAL", 99); check(S().count.text == "2", "an event that is not about an aura is ignored, even with the shield's name")
-		CLEU = { sub = "SPELL_AURA_REMOVED", nameSecret = true }; ns.cl.scripts.OnEvent(ns.cl, "COMBAT_LOG_EVENT_UNFILTERED")
-		check(S().shown and S().count.text == "2", "an aura event whose name is hidden: nothing is guessed")
-		-- names hidden by the game: nothing is guessed
-		CLEU = { secret = true }; ns.cl.scripts.OnEvent(ns.cl, "COMBAT_LOG_EVENT_UNFILTERED")
-		check(S().shown and S().count.text == "2", "hidden combat log events: nothing changes")
-		local seenLog
-		for _, l in ipairs(ShamanKitDB.log) do if l:find("SHIELD log") then seenLog = true end end
-		check(seenLog, "the log says what the combat log said")
-		-- fight over: the real reading again
-		AURAS_HIDDEN = false; inCombat = false; auras["Lightning Shield"] = { applications = 2, auraInstanceID = 354, spellId = 945 }
-		fire("PLAYER_REGEN_ENABLED"); check(S().shown and S().count.text == "2", "fight over: readable again")
-		-- icon off: not listening (cost)
-		db.shieldOn = false; ns.updateAux()
-		check(not ns.cl.registered.COMBAT_LOG_EVENT_UNFILTERED, "shield icon off: the combat log is not listened to")
-		db.shieldOn = true; ns.updateAux()
-		check(ns.cl.registered.COMBAT_LOG_EVENT_UNFILTERED, "shield icon on again: listening")
-		auras["Lightning Shield"] = nil; fire("UNIT_AURA", "player")
-		noErrors("log route: no error in the log")
 	end
 
 	-- the switches
