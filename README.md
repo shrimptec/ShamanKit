@@ -15,9 +15,9 @@ Small helpers for shamans, for World of Warcraft: Forever, in the default UI sty
   icon shows a yellow ?. Each time you walk away from a totem out of a fight, ShamanKit notes where its buff really
   stopped and uses that for the same totem in the next fight, so the ? shrinks to about a yard. Totems with no buff
   (Searing, Magma) can't learn this and keep the wider ?.
-- **Buff on the totem's icon** (Totem bar page, three choices): *a small picture on the corner* while the buff is on you, or
-  *the icon follows it*: in a fight the totem icon stands red and the game draws a bright copy over it only while you have
-  the buff, so bright means in range and red means out, with no guessing and no ?. The game draws it, so it works in a
+- **Show range in a fight** (one tick box on the Totem bar page, off by default): in a fight the totem icon stands red and
+  the game draws a bright copy over it only while you have the buff, so bright means in range and red means out, with no
+  guessing and no ?. The game draws it, so it works in a
   fight and in dungeons, where no addon can measure range or read buffs. The buff's spell ids are learned the first time
   a totem's buff can be read, so drop each totem once out of a fight. A buff from someone else's identical totem shows
   too. Totems with no buff (Searing, Magma, Earthbind, Stoneclaw) keep the position estimate.

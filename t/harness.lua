@@ -3262,7 +3262,7 @@ do
 	BUFF_READS = true
 	pos = { y = 0, x = 0, map = 1 }
 	t = t + 10
-	check(ns.defaults.buffBadge == true, "badges: on by default")
+	check(ns.defaults.buffBadge == false and ns.defaults.buffFollow == false, "badges: off by default (one tick box, unticked)")
 	check(#ns.BADGE_EVENTS == 2, "badges: two events")
 
 	-- the first time the buff can be read, its spell id is learned
@@ -3335,17 +3335,23 @@ do
 	check(not S.boxes["8076b"].c.shown and not S.boxes["8076b"].c.enabled, "badges: switched off: gone")
 	db.buffBadge = true; ns.badgeSchedule(); settle()
 	check(S.boxes["8076b"].c.shown == true, "badges: switched on again: back")
-	local bm = {}
-	for _, f in ipairs(frames) do if (f.value == "corner" or f.value == "follow" or f.value == "none") and f.scripts.OnClick and f.parentFrame == savedCat.pages[2] then bm[f.value] = f end end
-	check(bm.corner and bm.follow and bm.none, "badges: three choices on the Totem bar page (corner, follow, nothing)")
-	bm.none.scripts.OnClick(bm.none); settle()
-	check(db.buffBadge == false and db.buffFollow == false and bm.none.checked and not bm.corner.checked and not S.boxes["8076b"].c.shown, "badges: 'Nothing' hides them at once")
-	bm.follow.scripts.OnClick(bm.follow); settle()
-	check(db.buffBadge == true and db.buffFollow == true and bm.follow.checked and not bm.none.checked, "badges: 'The icon follows it' sets both")
-	bm.corner.scripts.OnClick(bm.corner); settle()
-	check(db.buffBadge == true and db.buffFollow == false and bm.corner.checked and S.boxes["8076b"].c.shown, "badges: 'Small picture' is the plain badge again")
-	db.buffBadge = false; db.buffFollow = true; savedCat.pages[2].OnDefault()
-	check(db.buffBadge == true and db.buffFollow == false and bm.corner.checked, "badges: the page's Defaults: the small picture, not following")
+	local bm
+	for _, f in ipairs(frames) do if f.settingKey == "buffFollow" and f.parentFrame == savedCat.pages[2] then bm = f end end
+	check(bm ~= nil, "badges: one tick box on the Totem bar page")
+	local nradio = 0
+	for _, f in ipairs(frames) do if (f.value == "corner" or f.value == "follow" or f.value == "none") and f.parentFrame == savedCat.pages[2] then nradio = nradio + 1 end end
+	check(nradio == 0, "badges: the three-way choice is gone")
+	db.buffBadge = false; db.buffFollow = false; savedCat.pages[2].OnShow(); bm:SetChecked(true); bm.scripts.OnClick(bm); settle()
+	check(db.buffBadge == true and db.buffFollow == true and bm.checked, "badges: ticking sets both")
+	bm:SetChecked(false); bm.scripts.OnClick(bm); settle()
+	check(db.buffBadge == false and db.buffFollow == false and not bm.checked and not S.boxes["8076b"].c.shown, "badges: unticking hides them at once")
+	db.buffBadge = true; db.buffFollow = false; bm.refresh()
+	check(not bm.checked, "badges: a half-set old value reads as unticked")
+	db.buffBadge = false; db.buffFollow = true; bm.refresh()
+	check(not bm.checked, "badges: follow without the badge reads as unticked")
+	db.buffBadge = true; db.buffFollow = true; savedCat.pages[2].OnDefault()
+	check(db.buffBadge == false and db.buffFollow == false and not bm.checked, "badges: the page's Defaults: unticked")
+	db.buffBadge = true   -- the tests below use the corner picture
 	settle()
 
 	-- only plain numbers that name a spell are learned; the list per buff stays short
@@ -4153,7 +4159,7 @@ do
 		cureWash = true, cureWashAlpha = 65, cureSize = 29, cureSpacing = 4, curePoint = "BOTTOM", cureRelPoint = "BOTTOM", cureX = -482, cureY = 337,
 		callOn = false, callTotemic = true, callRecall = false, callShow = "bar", callScale = 55, callSide = "right", callAnchor = "bar", callAlign = "start", callChoice = 0,
 		posCallOwn = true, posCallSide = "left", posCallAlign = "start", posTotemicOwn = true, posTotemicSide = "top", posTotemicAlign = "center",
-		posRecallOwn = true, posRecallSide = "right", posRecallAlign = "start", showAdvanced = false, buffBadge = true,
+		posRecallOwn = true, posRecallSide = "right", posRecallAlign = "start", showAdvanced = false, buffBadge = false,
 	}
 	local bad = {}
 	for k, v in pairs(want) do if SHIPPED[k] ~= v then bad[#bad + 1] = k .. "=" .. tostring(SHIPPED[k]) end end
@@ -4170,6 +4176,16 @@ do
 	ShamanKitDB = { size = 50, reserve = {} }
 	fire("ADDON_LOADED", "ShamanKit")
 	check(ShamanKitDB.size == 50 and ShamanKitDB.spacing == 6 and next(ShamanKitDB.reserve) == nil, "existing install: saved values stay, missing ones are filled")
+	-- 0.22: an older install that showed the corner picture ends up unticked; one that had follow mode stays ticked
+	ShamanKitDB = { buffBadge = true, buffFollow = false }
+	fire("ADDON_LOADED", "ShamanKit")
+	check(ShamanKitDB.buffBadge == false and ShamanKitDB.buffFollow == false, "old corner-picture install: unticked, no picture")
+	ShamanKitDB = { buffBadge = true, buffFollow = true }
+	fire("ADDON_LOADED", "ShamanKit")
+	check(ShamanKitDB.buffBadge == true and ShamanKitDB.buffFollow == true, "old follow-mode install: stays ticked")
+	ShamanKitDB = nil
+	fire("ADDON_LOADED", "ShamanKit")
+	check(ShamanKitDB.buffBadge == false and ShamanKitDB.buffFollow == false, "fresh install: unticked")
 end
 
 check(#printedErrors == 0, "the addon never printed an error line during the whole run" .. (printedErrors[1] and (": " .. printedErrors[1]) or ""))

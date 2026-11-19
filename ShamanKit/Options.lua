@@ -315,20 +315,12 @@ function ns.buildOptions()
 	reset:SetScript("OnClick", function() ns.resetPosition(); main.refresh() end)
 	note(p1, "Move on screen (top right) drags everything at once.", RIGHT, -240)
 
-	header(p1, "Buff on the icon", RIGHT, -268, COLW)
-	local function badgeMode()
-		local d = ns.get()
-		if d.buffBadge == false then return "none" end
-		return d.buffFollow == true and "follow" or "corner"
-	end
-	local badge = radioGroup(p1, {
-		{ "corner", "Small picture on the corner while you have it" },
-		{ "follow", "The icon follows it: bright with, red without" },
-		{ "none", "Nothing" },
-	}, RIGHT, -292, 1, 0, 24, badgeMode,
-		function(v) local d = ns.get(); d.buffBadge = v ~= "none"; d.buffFollow = v == "follow" end)
-	main.add(badge)
-	note(p1, "The game draws it, so it holds in a fight and in\ndungeons, where range can't be measured.", RIGHT, -368)
+	header(p1, "Range in a fight", RIGHT, -268, COLW)
+	-- one tick box: the old corner picture is retired, both settings follow this one
+	main.add(checkbox(p1, "Show range in a fight", "buffFollow", RIGHT, -292,
+		function() local d = ns.get(); return d.buffFollow == true and d.buffBadge ~= false end,
+		function(on) local d = ns.get(); d.buffFollow = on; d.buffBadge = on end))
+	note(p1, "Bright = in range, red = out of range.\nThe game draws it, so it also works\nin dungeons, where range can't be read.", RIGHT + 28, -318)
 
 	-- advanced: exact nudges while under the player frame, and how the range is judged
 	local offX = main.adv(main.add(slider(p1, "Position left / right (under the player frame)", "attachX", -200, 300, RIGHT, -412)))
@@ -345,7 +337,7 @@ function ns.buildOptions()
 		enable(unlock, not on or ns.auxMode() == "free")
 	end
 	attach:HookScript("OnClick", mainDependents)
-	main.after[#main.after + 1] = function() distance.refresh(); badge.refresh(); mainDependents() end
+	main.after[#main.after + 1] = function() distance.refresh(); mainDependents() end
 
 	-- ------------------------------------------------------------ page 2: the totems
 	local totems = newPage("Totems", "Totems",

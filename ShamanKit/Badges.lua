@@ -18,7 +18,7 @@ local dbg, guard, isSecret = ns.dbg, ns.guard, ns.isSecret
 local db
 
 local D = ns.defaults
-D.buffBadge = true             -- show the totem's buff on its icon while it is on you (works in a fight and in dungeons)
+D.buffBadge = false            -- the corner picture; only on while "Show range in a fight" is ticked (the page sets both)
 D.buffFollow = false           -- in a fight the totem icon itself follows the buff: bright with the buff, red without it
 -- (db.buffIds is not a default: it is learned, one set of spell ids per buff name)
 

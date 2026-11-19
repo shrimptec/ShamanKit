@@ -50,6 +50,7 @@ function ns.migrate(d)
 	if d.showRange == false and d.showOut == nil then d.showOut = false end   -- the old single switch hid both marks
 	if d.auxAnchor == nil then d.auxAnchor = (d.auxAttached == false) and "free" or "bar" end   -- "attached or not" became bar / player frame / own place
 	d.auxAttached = nil
+	if d.buffFollow ~= true then d.buffBadge = false end   -- 0.22: the corner picture is retired; one tick box (buffFollow) now
 end
 
 local isSecret = issecretvalue or function() return false end
