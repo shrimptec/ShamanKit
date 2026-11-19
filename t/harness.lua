@@ -3411,6 +3411,38 @@ do
 	local joined = table.concat(out, "\n")
 	check(joined:find("buff badges: on, %d+ drawn by the game") and joined:find("Strength of Earth %(8076,25528%)"), "badges: /shamankit status lists the learned ids")
 
+	-- the secrecy probe: asks which spells the game hides in a fight, out of a fight only, and keeps the answers
+	do
+		local realC = C_Secrets
+		C_Secrets = setmetatable({
+			ShouldTotemSpellBeSecret = function(id) return id ~= 8075 end,
+			GetSpellAuraSecrecy = function(id) return id == 8076 and 0 or 2 end,
+			ShouldSpellAuraBeSecret = function() return false end,
+		}, { __index = realC })
+		ns.secrecyProbe()
+		local text = table.concat(ShamanKitLogDB.secrecy or {}, "\n")
+		check(text:find("slot 2 Strength of Earth Totem %(8075%): totemSecret=false auraSecrecy=2") ~= nil, "secrecy: a totem spell's answers are kept")
+		check(text:find("slot 2 Stoneskin Totem %(8071%): totemSecret=true") ~= nil, "secrecy: ...for every totem")
+		check(text:find("buff Strength of Earth %(8076%): auraSecrecy=0 auraSecretNow=false") ~= nil, "secrecy: ...and for every learned buff id")
+		local o2 = {}
+		local pr2 = print; print = function(...) o2[#o2 + 1] = table.concat({ ... }, " ") end
+		SlashCmdList.SHAMANKIT("status")
+		print = pr2
+		check(table.concat(o2, "\n"):find("secrecy probe") ~= nil and table.concat(o2, "\n"):find("Strength of Earth Totem %(8075%)") ~= nil, "secrecy: /shamankit status prints them")
+		inCombat = true; ShamanKitLogDB.secrecy = { "old" }
+		ns.secrecyProbe()
+		check(ShamanKitLogDB.secrecy[1] == "old", "secrecy: not asked in a fight")
+		inCombat = false
+		C_Secrets = setmetatable({ ShouldTotemSpellBeSecret = function() error("boom") end, GetSpellAuraSecrecy = function() return secret() end }, { __index = realC })
+		ns.secrecyProbe()
+		check(table.concat(ShamanKitLogDB.secrecy, "\n"):find("totemSecret=error auraSecrecy=secret") ~= nil, "secrecy: an error or a hidden answer is written as such, never thrown")
+		C_Secrets = nil
+		ns.secrecyProbe()
+		check(ShamanKitLogDB.secrecy[1]:find("not available") ~= nil, "secrecy: no C_Secrets: one line saying so")
+		C_Secrets = realC
+		ShamanKitLogDB.secrecy = nil
+	end
+
 	-- a pass with nothing changed writes nothing
 	local rw = 0
 	for _, bx in pairs(S.boxes) do

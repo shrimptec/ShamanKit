@@ -47,6 +47,7 @@ function ns.learnBuff(name, id)
 	set[id] = true
 	dbg("BADGE learned %s = spell %d", name, id)
 	ns.badgeSchedule()
+	if C_Timer and C_Timer.After and ns.secrecyProbe then C_Timer.After(2, ns.secrecyProbe) end
 end
 
 local function idsFor(name)
@@ -242,6 +243,50 @@ function ns.badgeSchedule()
 	if C_Timer and C_Timer.After then C_Timer.After(0.05, run) else run() end
 end
 
+-- ---------------------------------------------------------------- secrecy probe (information only)
+-- Asks the game which totem spells and which buff spell ids it flags as hidden in a fight (the wiki says individual totem
+-- spells can be flagged never/always secret). Out of a fight only; changes nothing on screen. The answers are kept in
+-- ShamanKitLogDB.secrecy (one text line each, replaced on every run) and printed by /shamankit status, so the next report
+-- can say whether any totem or buff could be read exactly in a fight.
+local function ask(fn, ...)
+	if type(fn) ~= "function" then return "n/a" end
+	local ok, v = pcall(fn, ...)
+	if not ok then return "error" end
+	if isSecret(v) then return "secret" end
+	return tostring(v)
+end
+
+local function probe()
+	if not db or InCombatLockdown() then return end
+	local C = C_Secrets
+	local lines = {}
+	if type(C) ~= "table" then
+		lines[1] = "C_Secrets is not available on this client"
+	else
+		for slot = 1, SLOTS do
+			for _, t in ipairs(ns.totemChoices and ns.totemChoices(slot) or {}) do
+				lines[#lines + 1] = ("slot %d %s (%d): totemSecret=%s auraSecrecy=%s"):format(slot, tostring(t.name), t.id,
+					ask(C.ShouldTotemSpellBeSecret, t.id), ask(C.GetSpellAuraSecrecy, t.id))
+			end
+		end
+		local names = {}
+		for name in pairs(type(db.buffIds) == "table" and db.buffIds or {}) do names[#names + 1] = name end
+		table.sort(names)
+		for _, name in ipairs(names) do
+			local set = db.buffIds[name]
+			if type(set) == "table" then
+				for _, id in ipairs(sorted(set)) do
+					lines[#lines + 1] = ("buff %s (%d): auraSecrecy=%s auraSecretNow=%s"):format(name, id, ask(C.GetSpellAuraSecrecy, id), ask(C.ShouldSpellAuraBeSecret, id))
+				end
+			end
+		end
+	end
+	ShamanKitLogDB = type(ShamanKitLogDB) == "table" and ShamanKitLogDB or {}
+	ShamanKitLogDB.secrecy = lines
+	dbg("SECRECY probe: %d spells checked (see /shamankit status)", #lines)
+end
+ns.secrecyProbe = guard("secrecy probe", probe)
+
 -- ---------------------------------------------------------------- events
 
 local EVENTS = { "PLAYER_ENTERING_WORLD", "PLAYER_REGEN_ENABLED" }
@@ -257,6 +302,7 @@ function ns.badgeInit()
 		if not ok then dbg("BADGE: event %s is not known here (%s)", e, short(err)) end
 	end
 	ns.badgeSchedule()
+	if C_Timer and C_Timer.After then C_Timer.After(5, ns.secrecyProbe) end
 end
 
 -- ---------------------------------------------------------------- status
@@ -274,6 +320,11 @@ function ns.badgeInfo()
 	local f = {}
 	for slot = 1, SLOTS do if S.armed[slot] then f[#f + 1] = ("slot %d (%s)"):format(slot, S.armed[slot]) end end
 	out[#out + 1] = ("icon follows the buff in a fight: %s%s"):format(db.buffFollow == true and "on" or "off", #f > 0 and (", ready for " .. table.concat(f, ", ")) or "")
+	local sec = type(ShamanKitLogDB) == "table" and ShamanKitLogDB.secrecy
+	if type(sec) == "table" and #sec > 0 then
+		out[#out + 1] = "which spells the game hides in a fight (secrecy probe):"
+		for _, l in ipairs(sec) do out[#out + 1] = "  " .. l end
+	end
 	out[#out + 1] = "buff spell ids learned: " .. (#names > 0 and table.concat(names, ", ") or "none yet (learned the first time a totem's buff can be read)")
 	return out
 end
