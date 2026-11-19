@@ -1251,7 +1251,7 @@ do
 	-- a new totem in the place: the last reading belonged to the old one
 	auras["Strength of Earth"] = nil
 	place(2, "Strength of Earth Totem IV")
-	t = t + 4; tick()
+	t = t + 6; tick()
 	check(mark(2) == "out", "range: a new totem in the place reads fresh, not the old totem's buff")
 
 	-- a fight: auras are hidden, nothing is read, the position answers only when it is clear
@@ -1300,6 +1300,23 @@ do
 	rawset(GameTooltip, "AddLine", nil)
 	check(tips[#tips] and tostring(tips[#tips]):find("near the edge") and tostring(tips[#tips]):find("Range unknown") == nil, "range: the tooltip says 'near the edge' (" .. tostring(tips[#tips]) .. ")")
 	AURAS_HIDDEN = false; inCombat = false
+
+	-- Totemic Call out of a fight: the totems come to you, their buff needs a pulse or two to come back (real log: 0.2 to 3.7 s)
+	clear(); BUFF_READS = true
+	place(2, "Strength of Earth Totem IV"); t = t + 10
+	at(60)
+	check(mark(2) == "out", "Totemic Call: 60 yd away, no buff: out")
+	fire("UNIT_SPELLCAST_SUCCEEDED", "player", "guid", 437009); t = t + 0.2; tick()
+	check(mark(2) == "in", "Totemic Call: the totem is at your feet, the buff not back yet: in, not out")
+	t = t + 3.5; tick()
+	check(mark(2) == "in", "Totemic Call: 3.7 s later, still no buff: still in (the buff takes a pulse or two)")
+	auras["Strength of Earth"] = {}; t = t + 1; tick()
+	check(mark(2) == "in", "Totemic Call: the buff is back: in")
+	auras["Strength of Earth"] = nil; t = t + 0.1; tick()
+	check(mark(2) == "in", "Totemic Call: the buff dropping at once after a call is still within the wait")
+	t = t + 6; tick()
+	check(mark(2) == "out", "Totemic Call: well after it, no buff at all: out again")
+	clear()
 
 	-- the setting: on by default, and off is exactly the old way (your drop spot alone, a hard cutoff)
 	check(ns.defaults.rangeByBuff == true, "range setting: on by default")
@@ -3451,7 +3468,7 @@ do
 		totems[2] = { name = "Strength of Earth Totem IV", start = t, dur = 120, icon = 8 }
 		fire("PLAYER_TOTEM_UPDATE", 2); tick()
 		check(select(5, ns.rangeOf(2)) == false and plain(btn(2)), "follow: ...the same totem again is just dropped: not red yet")
-		t = t + 4; tick()
+		t = t + 6; tick()
 		check(select(5, ns.rangeOf(2)) == true, "follow: ...and a few seconds later it is covered")
 		totems[1] = { name = "Searing Totem III", start = t, dur = 60, icon = 7 }
 		fire("PLAYER_TOTEM_UPDATE", 1); t = t + 1; tick()

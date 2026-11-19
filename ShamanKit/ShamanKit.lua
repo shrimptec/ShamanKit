@@ -422,7 +422,7 @@ end
 --     radius at most, so a small totem keeps most of its circle) the answer is a best guess (the radius, or the totem's learned edge): no "?" is drawn any more.
 local EDGE_BAND = 4
 local BUFF_EVERY = 0.5      -- seconds between buff reads for one totem (the buff changes on the totem's pulse)
-local BUFF_GRACE = 3        -- a totem's buff takes a moment to arrive: no buff in the first seconds proves nothing
+local BUFF_GRACE = 5        -- a totem's buff takes a moment to arrive (up to ~4 s seen after Totemic Call): no buff in the first seconds proves nothing
 
 local function edgeBand(range) return math.min(EDGE_BAND, range * 0.3) end
 
@@ -1990,6 +1990,9 @@ ev:SetScript("OnEvent", guard("event", function(self, event, arg1, ...)
 			local at = playerPos()
 			for slot, st in pairs(state) do
 				st.at, st.last = at, nil
+				-- the totem is next to you again, but its buff needs a pulse or two to come back (seen: up to 4 s): the
+				-- old "no buff" reading means nothing now, exactly as for a totem just dropped
+				st.t, st.buffAt, st.buffVal, st.offSince = GetTime(), nil, nil, nil
 				dbg("MOVED slot %d %s by spell %d to %s", slot, tostring(st.name), id, describe(at))
 			end
 		end
