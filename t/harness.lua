@@ -426,16 +426,16 @@ check(btn(2).mark.tex:find("NotReady"), "combat: 100 yd from the totem: red (pos
 fire("PLAYER_TOTEM_UPDATE", 2); tick()
 check(btn(2).mark.tex:find("Ready") and not btn(2).mark.tex:find("NotReady"), "combat: re-dropped, position recorded straight away (not after the fight)")
 -- a totem placed from empty in combat, named by the cast because the name is hidden
-totems[3] = { name = "Earthbind Totem", start = t, dur = 45, icon = 5 }
-fire("UNIT_SPELLCAST_SUCCEEDED", "player", "g", 557)
-fire("PLAYER_TOTEM_UPDATE", 3); runTimers(); tick()
-check(btn(3).shown, "combat: totem placed in combat appears")
+totems[1] = { name = "Magma Totem", start = t, dur = 45, icon = 5 }
+fire("UNIT_SPELLCAST_SUCCEEDED", "player", "g", 8190)
+fire("PLAYER_TOTEM_UPDATE", 1); runTimers(); tick()
+check(btn(1).shown, "combat: totem placed in combat appears")
 pos = { y = 100, x = 215, map = 1 }; tick()
-check(btn(3).mark.tex:find("NotReady"), "combat: 15 yd from Earthbind is out (10 yd radius known from the cast)")
+check(btn(1).mark.tex:find("NotReady"), "combat: 15 yd from Magma is out (8 yd radius known from the cast)")
 check(btn(2).mark.tex:find("Ready") and not btn(2).mark.tex:find("NotReady"), "combat: Strength of Earth 15 yd away still in (30 yd)")
 -- expires during combat
-totems[3] = nil; tick()
-check(not btn(3).shown, "combat: expired totem disappears without waiting for the fight to end")
+totems[1] = nil; tick()
+check(not btn(1).shown, "combat: expired totem disappears without waiting for the fight to end")
 check(hit2.mouse == true, "combat: nothing touched the protected buttons (no ADDON_ACTION_BLOCKED)")
 -- a totem placed in combat appears; its button stays unclickable until combat ends
 totems[3] = { name = "Searing Totem III", start = t, dur = 60, icon = 7 }
@@ -3239,6 +3239,103 @@ do
 	for _, l in ipairs(lines) do if l:find("weapon: ok") then sawW = true end if l:find("Lightning Shield: false") then sawS = true end end
 	check(sawW and sawS, "status: lists the weapon and the shield readings")
 	noErrors("icons: no error line in the log after all of that")
+end
+
+-- ---- naming totems in a fight: one cast per element (Call of the Elements drops four at once)
+do
+	local function clear()
+		totems = {}; secretMode = false; inCombat = false
+		for s = 1, 4 do fire("PLAYER_TOTEM_UPDATE", s) end
+		runTimers(); tick()
+	end
+	local function tex(id) return 100000 + id end
+	local function cast(id) fire("UNIT_SPELLCAST_SUCCEEDED", "player", "g", id) end
+	local function put(slot, name, icon) totems[slot] = { name = name, start = t, dur = 300, icon = icon or 9 } end
+	local SET = { { 1, "Searing Totem", 3599 }, { 2, "Strength of Earth Totem", 8075 }, { 3, "Healing Stream Totem", 5394 }, { 4, "Windfury Totem", 8512 } }
+	local function lineCount(pat) local n = 0; for _, l in ipairs(ShamanKitLogDB.lines or {}) do if l:find(pat) then n = n + 1 end end return n end
+	clear()
+	t = t + 10
+
+	-- a whole set at once in a fight, the casts arriving first
+	secretMode = true; inCombat = true
+	for _, e in ipairs(SET) do put(e[1], e[2]) end
+	for _, e in ipairs(SET) do cast(e[3]) end
+	for _, e in ipairs(SET) do fire("PLAYER_TOTEM_UPDATE", e[1]) end
+	runTimers(); tick()
+	for _, e in ipairs(SET) do
+		check(btn(e[1]).icon.tex == tex(e[3]), "set in a fight: place " .. e[1] .. " shows its own totem, " .. e[2] .. " (" .. tostring(btn(e[1]).icon.tex) .. ")")
+	end
+	check(ShamanKitDB.hold.last[4] == tex(8512) and ShamanKitDB.hold.last[2] == tex(8075) and ShamanKitDB.hold.last[1] == tex(3599), "set in a fight: each place remembers its own totem")
+	-- ...and the totems' own names, when the game shows them again, replace the casts' (the cast named Strength of Earth, the game says Stoneskin)
+	totems[2].name = "Stoneskin Totem"; totems[2].icon = 4
+	secretMode = false; inCombat = false
+	fire("PLAYER_REGEN_ENABLED"); runTimers(); tick()
+	check(lineCount("named Strength of Earth Totem from the cast, the game now says Stoneskin Totem") == 1, "after the fight: a name that was only a cast is replaced by the real one")
+	check(btn(2).icon.tex == 4, "after the fight: the real icon shows")
+	clear()
+	t = t + 10
+
+	-- the totem events first, the casts after
+	secretMode = true; inCombat = true
+	for _, e in ipairs(SET) do put(e[1], e[2]) end
+	for _, e in ipairs(SET) do fire("PLAYER_TOTEM_UPDATE", e[1]) end
+	for _, e in ipairs(SET) do cast(e[3]) end
+	runTimers(); tick()
+	for _, e in ipairs(SET) do
+		check(btn(e[1]).icon.tex == tex(e[3]), "events first: place " .. e[1] .. " is named by its own element's cast (" .. tostring(btn(e[1]).icon.tex) .. ")")
+	end
+	clear()
+	t = t + 10
+
+	-- events first, the real name differs from the cast's: corrected after the fight too
+	clear(); t = t + 10
+	secretMode = true; inCombat = true
+	put(2, "Strength of Earth Totem"); fire("PLAYER_TOTEM_UPDATE", 2); cast(8075); runTimers()
+	totems[2].name = "Stoneskin Totem"; secretMode = false; inCombat = false
+	local fixedBefore = lineCount("the game now says Stoneskin Totem")
+	fire("PLAYER_REGEN_ENABLED"); runTimers(); tick()
+	check(lineCount("the game now says Stoneskin Totem") == fixedBefore + 1, "events first: the cast's name is replaced by the real one after the fight")
+	-- a place whose name is already read is never renamed by a cast
+	clear(); t = t + 10
+	put(2, "Stoneskin Totem", 9); fire("PLAYER_TOTEM_UPDATE", 2)
+	cast(8075); runTimers(); tick()
+	check(btn(2).icon.tex == 9, "a totem whose name is known is not renamed by a later cast")
+	-- a cast of one element never names another element's place
+	secretMode = true; inCombat = true
+	cast(8512)                                             -- Windfury (air)
+	put(2, "Strength of Earth Totem")
+	fire("PLAYER_TOTEM_UPDATE", 2); runTimers(); tick()
+	check(btn(2).icon.tex ~= tex(8512), "an air cast does not name an earth place")
+	cast(8075); runTimers()
+	check(btn(2).icon.tex == tex(8075), "...its own element's cast does")
+	clear()
+	t = t + 10
+
+	-- a place that held something else: the old name is not kept for a new totem
+	put(2, "Stoneskin Totem"); fire("PLAYER_TOTEM_UPDATE", 2)
+	check(btn(2).icon.tex ~= tex(8071) or btn(2).icon.tex == 9, "(the old totem shows as read out of the fight)")
+	secretMode = true; inCombat = true
+	totems[2] = { name = "Strength of Earth Totem", start = t + 5, dur = 300, icon = 9 }
+	fire("PLAYER_TOTEM_UPDATE", 2); runTimers(); tick()
+	check(btn(2).icon.tex ~= tex(8071), "a new totem dropped unnamed in a fight does not wear the old totem's name")
+	clear()
+	t = t + 10
+
+	-- Call of the Elements itself and spells that are not totems name nothing
+	secretMode = true; inCombat = true
+	local namedBefore = lineCount("named slot 1 from cast")
+	cast(556); cast(12345); cast(437009)
+	put(1, "Searing Totem"); fire("PLAYER_TOTEM_UPDATE", 1); runTimers(); tick()
+	check(btn(1).icon.tex ~= tex(3599) and lineCount("named slot 1 from cast") == namedBefore, "Call of the Elements, Totemic Call and unknown spells name nothing")
+	-- a cast that is too old names nothing either
+	clear(); t = t + 10
+	secretMode = true; inCombat = true
+	cast(3599); runTimers(); t = t + 5
+	put(1, "Searing Totem"); fire("PLAYER_TOTEM_UPDATE", 1); tick()
+	check(btn(1).icon.tex ~= tex(3599), "a cast from long ago names nothing")
+	noErrors("naming: nothing raised an error in the log")
+	clear()
+	t = t + 10
 end
 
 -- ---- Simple / Advanced: the fiddly settings hide until "Show advanced"

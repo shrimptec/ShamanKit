@@ -167,6 +167,18 @@ local function iconForName(name)
 	end
 end
 
+-- the element (slot) that puts the totem called `name` down, from the catalogue; nil when it is not one of ours
+local function slotOfTotem(name)
+	if type(name) ~= "string" or isSecret(name) then return nil end
+	local lower = name:lower()
+	for slot, list in pairs(CATALOGUE) do
+		for _, entry in ipairs(list) do
+			local key = entry[1]:lower():gsub(" totem$", "")
+			if lower:find(key, 1, true) then return slot end
+		end
+	end
+end
+
 -- db.hold.last[slot] = icon of the last totem seen in that place; db.hold.lastSpell[slot] = the spell id of that totem
 -- (for the left-click cast); db.hold.choice[slot] = spell id of the totem the player locked that place's placeholder
 -- to. Always plain tables with plain values.
@@ -824,10 +836,13 @@ local function readSlot(slot)
 	return true, name, start, duration, icon, not isSecret(have)
 end
 
--- The totem spell just cast, for naming a totem whose name the game hides in combat
-local lastCast = { name = nil, t = 0 }
-local function recentCastName()
-	if lastCast.name and GetTime() - lastCast.t < 3 then return lastCast.name end
+-- The totem spell just cast IN EACH PLACE (one per element), for naming a totem whose name the game hides in combat. It is
+-- kept per place: Call of the Elements drops four totems at once, and one "last cast" for the whole bar named all of them
+-- after whichever came last (every icon turned into Windfury).
+local lastCast = {}
+local function recentCastName(slot)
+	local c = lastCast[slot]
+	if c and GetTime() - c.t < 3 then return c.name end
 end
 
 -- placed: the totem just appeared (or was moved to us), so we are standing on it
@@ -852,12 +867,16 @@ local function refreshSlot(slot, placed)
 		s.t = GetTime()
 		s.last = nil
 		s.buffAt, s.buffVal = nil, nil     -- a new totem: the last buff reading belonged to the old one
-		local known = (not isSecret(name) and type(name) == "string" and name ~= "") and name or recentCastName()
-		if known then s.name = known end
+		local real = not isSecret(name) and type(name) == "string" and name ~= ""
+		local known = real and name or recentCastName(slot)
+		s.name = known                         -- no name yet: not the name of whatever was in this place before
+		s.guessed = (not real) and known ~= nil   -- named from a cast, not read: the real name replaces it when the game shows it
 		s.range, s.aura = classify(s.name)
 		dbg("PLACED slot %d %s at %s%s", slot, tostring(s.name), describe(s.at), (isSecret(have) or isSecret(name)) and " (hidden readings)" or "")
-	elseif not s.name and not isSecret(name) and type(name) == "string" then
+	elseif (not s.name or s.guessed) and not isSecret(name) and type(name) == "string" and name ~= "" then
+		if s.guessed and s.name ~= name then dbg("slot %d: named %s from the cast, the game now says %s", slot, tostring(s.name), name) end
 		s.name = name
+		s.guessed = false
 		s.range, s.aura = classify(name)
 		s.buffAt, s.buffVal = nil, nil
 	end
@@ -1784,18 +1803,22 @@ local function onTotemCast(id)
 	local info = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(id)
 	local cast = info and info.name
 	if type(cast) ~= "string" or isSecret(cast) then return end
-	if MULTI[cast] or not cast:find("Totem", 1, true) then return end
-	lastCast.name, lastCast.t = cast, GetTime()
+	if MULTI[cast] then return end
+	local slot = slotOfTotem(cast)                 -- the element it belongs to: only that place can be named by it
+	if not slot then return end
+	lastCast[slot] = { name = cast, t = GetTime() }
 	C_Timer.After(0.3, function()
-		for slot, st in pairs(state) do
-			if not st.name and GetTime() - (st.t or 0) < 2 then
-				st.name = cast
-				st.range, st.aura = classify(cast)
-				st.last = nil
-				st.buffAt, st.buffVal = nil, nil
-				rememberSafe(slot, nil, cast)
-				dbg("named slot %d from cast: %s", slot, cast)
-			end
+		local st = state[slot]
+		if st and not st.name and GetTime() - (st.t or 0) < 2 then
+			st.name = cast
+			st.guessed = true
+			st.range, st.aura = classify(cast)
+			st.last = nil
+			st.buffAt, st.buffVal = nil, nil
+			rememberSafe(slot, nil, cast)
+			local b, tex = buttons[slot], iconForName(cast)
+			if b and tex then pcall(b.icon.SetTexture, b.icon, tex) end   -- the picture follows the name (the game hides the real one)
+			dbg("named slot %d from cast: %s", slot, cast)
 		end
 	end)
 end
