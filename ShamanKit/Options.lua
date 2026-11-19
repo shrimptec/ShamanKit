@@ -151,6 +151,7 @@ function ns.buildOptions()
 	-- Every page tells the bar to show its samples while it is on screen; two pages can be swapped in one go
 	-- (one hides as the other shows), so count the pages that are up instead of keeping one flag.
 	local up = {}
+	function ns.pagesUp() return next(up) ~= nil end
 	local function newPage(name, title, subtitle, keys)
 		local panel = CreateFrame("Frame")
 		panel.name = name
@@ -163,6 +164,20 @@ function ns.buildOptions()
 		local t = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
 		t:SetPoint("TOPLEFT", 16, -16)
 		t:SetText(title)
+		-- every page: put all the pieces on screen at once and drag them (Move.lua)
+		local mv = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+		mv:SetSize(150, 22)
+		mv:SetPoint("TOPRIGHT", -16, -14)
+		mv:SetText("Move on screen")
+		mv:SetScript("OnClick", function() if ns.moveStart then ns.moveStart() end end)
+		mv:SetScript("OnEnter", function(self)
+			GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+			GameTooltip:SetText("Move on screen")
+			GameTooltip:AddLine("Closes this window and shows the bar, the buff icons, the cure row and the Call buttons as frames you can drag.", 1, 1, 1, true)
+			GameTooltip:Show()
+		end)
+		mv:SetScript("OnLeave", GameTooltip_Hide)
+		panel.moveButton = mv
 		note(panel, subtitle, 16, -42)
 		panel:SetScript("OnShow", function()
 			up[panel] = true
@@ -172,7 +187,7 @@ function ns.buildOptions()
 		end)
 		panel:SetScript("OnHide", function()
 			up[panel] = nil
-			ns.optionsOpen = next(up) ~= nil
+			ns.optionsOpen = next(up) ~= nil or ns.moveMode == true     -- Move mode keeps the samples up too
 			ns.updatePreview()
 		end)
 		panel.OnCommit = function() end
@@ -209,7 +224,7 @@ function ns.buildOptions()
 	pageButton("Cures", "cures", -218, "Your cure spells light up while a poison, disease or curse is on you.")
 	pageButton("Call spells", "calls", -252, "Buttons for Call of the ..., Totemic Call and Totemic Recall at the bar.")
 	header(p0, "Commands", LEFT, -304, 580)
-	note(p0, "/shamankit - open this window\n/shamankit bar, totems, buffs, cures or calls - open that page\n/shamankit cures test - light the cures for a few seconds (also /cw)\n/shamankit lock or unlock - lock the frames, or make them draggable\n/shamankit reset - put the bar, the buff icons and the cure row back in the usual place\n/shamankit status - print what the addon reads (for bug reports)", LEFT, -330)
+	note(p0, "/shamankit - open this window\n/shamankit bar, totems, buffs, cures or calls - open that page\n/shamankit cures test - light the cures for a few seconds (also /cw)\n/shamankit move - show every piece as a frame you can drag (also the Move on screen button on each page)\n/shamankit lock or unlock - lock the frames, or make them draggable\n/shamankit reset - put the bar, the buff icons and the cure row back in the usual place\n/shamankit status - print what the addon reads (for bug reports)", LEFT, -330)
 
 	-- ------------------------------------------------------------ page 1: the totem bar
 	local main = newPage("Totem bar", "Totem bar",

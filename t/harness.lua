@@ -256,9 +256,10 @@ load("ShamanKit/Calls.lua")
 load("ShamanKit/Options.lua")
 load("ShamanKit/CureOptions.lua")
 load("ShamanKit/CallOptions.lua")
+load("ShamanKit/Move.lua")
 
 local ev
-for _, f in ipairs(frames) do if f.scripts.OnEvent then ev = f end end
+for _, f in ipairs(frames) do if f.scripts.OnEvent and f.registered and f.registered.ADDON_LOADED then ev = f end end
 local function fire(e, ...) ev.scripts.OnEvent(ev, e, ...) end
 local function bar() return _G.ShamanKitBar end
 local function btn(i) return _G["ShamanKitButton" .. i] end
@@ -3237,6 +3238,246 @@ do
 	for _, l in ipairs(lines) do if l:find("weapon: ok") then sawW = true end if l:find("Lightning Shield: false") then sawS = true end end
 	check(sawW and sawS, "status: lists the weapon and the shield readings")
 	noErrors("icons: no error line in the log after all of that")
+end
+
+-- ---- Move mode: every piece as a frame you drag (Move.lua)
+do
+	local db = ShamanKitDB
+	local M = ns.moveState
+	local CS = ns.cureState
+	local function lineCount(pat) local n = 0; for _, l in ipairs(db.log or {}) do if l:find(pat) then n = n + 1 end end return n end
+	rawset(UIParent, "GetCenter", function() return 960, 540 end)         -- the middle of a pretend screen
+	local function rectFor(name, l, b, w, h)
+		local f = _G[name]
+		assert(f, "no frame " .. name)
+		rawset(f, "GetRect", function() return l, b, w, h end)
+	end
+	local function overlayFor(id) return M.overlays[id] end
+	local function settle() runTimers(); runTimers() end
+	local function setup()
+		inCombat = false; AURAS_HIDDEN = false
+		db.locked = true; db.attach = false; db.shieldOn = true; db.weaponOn = true; db.auxAnchor = "bar"
+		db.cureOn = true; db.cureRow = true; db.cureAlways = false
+		db.callOn = true; db.callTotemic = true; db.callRecall = false; db.callShow = "always"
+		for _, k in ipairs({ "posCall", "posTotemic", "posRecall" }) do db[k .. "Own"] = false; db[k .. "Anchor"] = "bar" end
+		db.callAnchor = "bar"
+		db.point, db.relPoint, db.x, db.y = "CENTER", "CENTER", 0, -200
+		CURE_KNOWN = { [526] = true, [2870] = true, [1299026] = true }; CS.knownDirty = true
+		IsPlayerSpell = function(id) return id == 66842 or id == 437009 or id == 36936 end
+		ns.updatePreview(); ns.callApply(); ns.cureApply()
+	end
+	setup()
+	check(type(ns.moveStart) == "function" and type(ns.moveStop) == "function" and type(ns.moveResetAll) == "function", "move: the mode has start, stop and reset")
+	check(#ns.moveProviders == 3, "move: the bar and buffs, the cure row and the Call buttons each offer pieces (" .. #ns.moveProviders .. ")")
+	check(M.on == false and ns.moveMode ~= true, "move: off to begin with")
+	for i, pg in ipairs(savedCat.pages) do
+		check(pg.moveButton ~= nil, "move: page " .. i .. " has the 'Move on screen' button")
+	end
+
+	-- where every piece is on the pretend screen (nothing touches)
+	rectFor("ShamanKitBar", 100, 120, 150, 40)
+	rectFor("ShamanKitIndicators", 100, 60, 60, 30)
+	rectFor("ShamanKitCureRow", 400, 300, 120, 40)
+	rectFor("ShamanKitCalls", 300, 100, 80, 36)
+	rectFor("ShamanKitCall2", 700, 700, 36, 36)
+
+	-- a fight: nothing starts
+	inCombat = true
+	ns.moveStart()
+	check(M.on == false and ns.moveMode ~= true, "move: not in a fight")
+	inCombat = false
+
+	-- start: the settings window closes (and comes back after), the samples stay up, the panel shows
+	local hidden = 0
+	SettingsPanel = { IsShown = function() return true end }
+	HideUIPanel = function(f) if f == SettingsPanel then hidden = hidden + 1 end end
+	local reopened = 0
+	local realOpen = ns.openOptions
+	ns.openOptions = function() reopened = reopened + 1 end
+	savedCat.pages[1].moveButton.scripts.OnClick()
+	check(M.on == true and ns.moveMode == true and ns.optionsOpen == true, "move: the page's button starts it; the samples are up like an open settings page")
+	check(hidden == 1, "move: the settings window is closed out of the way")
+	check(M.panel and M.panel.shown == true and M.panel.name == "ShamanKitMovePanel", "move: a small panel with Done")
+	local inSpecial = false
+	for _, n in ipairs(UISpecialFrames) do if n == "ShamanKitMovePanel" then inSpecial = true end end
+	check(inSpecial, "move: Esc is Done")
+	settle()
+	for _, id in ipairs({ "bar", "buffs", "cures", "calls" }) do check(overlayFor(id) and overlayFor(id).shown, "move: a frame over the " .. id) end
+	check(overlayFor("call_totemic") == nil or not overlayFor("call_totemic").shown, "move: a button that is with the others has no frame of its own")
+	local ob = overlayFor("bar")
+	check(ob.anchor[1] == "BOTTOMLEFT" and ob.anchor[2] == UIParent and ob.anchor[4] == 100 and ob.anchor[5] == 120 and ob.w == 150 and ob.h == 40, "move: the frame lies exactly over the piece")
+	check(ob.label.text == "Totem bar" and overlayFor("buffs").label.text == "Buff icons" and overlayFor("calls").label.text == "Call buttons" and overlayFor("cures").label.text == "Cure row", "move: each frame says what it is")
+	check(#M.overlapping == 0 and ob.colour[2] == 0.82 and M.panel.warn.text == "Nothing overlaps.", "move: nothing overlaps: gold, and the panel says so")
+	check(overlayFor("bar").mouse == true, "move: the frames take the mouse (a click can't cast through them)")
+	check(CS.cells.poison and CS.cells.poison.shown == true and CS.cells.disease.shown == true, "move: the cure row is on screen while moving, locked or not")
+
+	-- overlapping pieces turn red and are named
+	rectFor("ShamanKitIndicators", 120, 110, 60, 30)
+	M.sync()
+	check(#M.overlapping == 1 and M.overlapping[1] == "Totem bar and Buff icons", "move: the buff icons on the bar are reported (" .. tostring(M.overlapping[1]) .. ")")
+	check(overlayFor("bar").colour[1] == 1 and overlayFor("bar").colour[2] == 0.25 and overlayFor("buffs").colour[2] == 0.25 and overlayFor("cures").colour[2] == 0.82, "move: both turn red, the others stay gold")
+	check(M.panel.warn.text:find("on top of each other") and M.panel.warn.text:find("Totem bar and Buff icons"), "move: the panel names them")
+	rectFor("ShamanKitIndicators", 250, 110, 40, 20)               -- just touching is not overlapping
+	M.sync()
+	check(#M.overlapping == 0 and overlayFor("bar").colour[2] == 0.82, "move: pieces that only touch are fine, and the colour goes back")
+	rectFor("ShamanKitIndicators", 100, 60, 60, 30)
+	M.sync()
+
+	-- dragging: an overlay dropped with its middle at (375, 220) is 585 left of and 320 below the middle of the screen
+	local function drag(o, l, b)
+		local started, stopped = 0, 0
+		rawset(o, "StartMoving", function() started = started + 1 end)
+		rawset(o, "StopMovingOrSizing", function() stopped = stopped + 1 end)
+		rawset(o, "GetLeft", function() return l end)
+		rawset(o, "GetBottom", function() return b end)
+		rawset(o, "GetSize", function() return o.w, o.h end)
+		o.scripts.OnDragStart(o)
+		o.scripts.OnDragStop(o)
+		rawset(o, "StartMoving", nil); rawset(o, "StopMovingOrSizing", nil)
+		return started, stopped
+	end
+	db.attach = true
+	local st, sp = drag(overlayFor("bar"), 300, 200)
+	check(st == 1 and sp == 1, "move: the drag starts and stops on the frame")
+	check(db.point == "CENTER" and db.relPoint == "CENTER" and db.x == -585 and db.y == -320 and db.attach == false, "move: the bar is saved by its middle, and 'replace the default timers' is off (" .. tostring(db.x) .. "," .. tostring(db.y) .. ")")
+	settle()
+	check(overlayFor("bar").anchor[4] == 100, "move: afterwards the frame follows the piece again")
+	drag(overlayFor("buffs"), 600, 300)
+	check(db.auxAnchor == "free" and db.auxPoint == "CENTER" and db.auxRelPoint == "CENTER" and db.auxX == -330 and db.auxY == -225, "move: the buff icons take a place of their own where they were dropped (" .. tostring(db.auxX) .. "," .. tostring(db.auxY) .. ")")
+	drag(overlayFor("cures"), 800, 600)
+	check(db.curePoint == "CENTER" and db.cureRelPoint == "CENTER" and db.cureX == -100 and db.cureY == 80, "move: the cure row is saved by its middle (" .. tostring(db.cureX) .. "," .. tostring(db.cureY) .. ")")
+	drag(overlayFor("calls"), 200, 200)
+	check(db.callAnchor == "free" and db.callPoint == "CENTER" and db.callX == -720 and db.callY == -322, "move: the Call buttons become a place of their own where dropped (" .. tostring(db.callX) .. "," .. tostring(db.callY) .. ")")
+	db.posTotemicOwn = true; ns.callApply(); M.sync()
+	check(overlayFor("call_totemic") and overlayFor("call_totemic").shown and overlayFor("call_totemic").label.text == "Totemic Call", "move: a button placed on its own gets its own frame")
+	drag(overlayFor("call_totemic"), 1000, 600)
+	check(db.posTotemicAnchor == "free" and db.posTotemicX == 58 and db.posTotemicY == 78 and db.callX == -720, "move: it is saved on its own, the group's place is left alone (" .. tostring(db.posTotemicX) .. "," .. tostring(db.posTotemicY) .. ")")
+
+	check(CS.row.anchor[1] == "CENTER" and CS.row.anchor[4] == -100 and CS.row.anchor[5] == 80, "move: after the drop the cure row itself moves there")
+	-- a piece that goes away loses its frame; a piece too small to grab has none
+	db.shieldOn = false; db.weaponOn = false; ns.updatePreview(); M.sync()
+	check(not overlayFor("buffs").shown, "move: a piece that is switched off loses its frame")
+	db.shieldOn = true; db.weaponOn = true; ns.updatePreview(); M.sync()
+	check(overlayFor("buffs").shown, "move: ...and gets it back")
+	rectFor("ShamanKitIndicators", 100, 60, 2, 2); M.sync()
+	check(not overlayFor("buffs").shown, "move: a piece that is only a speck has no frame")
+	rectFor("ShamanKitIndicators", 100, 60, 60, 30); M.sync()
+	-- every button on its own: the group has nothing in it, so no frame for it
+	db.posCallOwn = true; ns.callApply(); M.sync()
+	check(not overlayFor("calls").shown, "move: no buttons in the group: no frame for the group")
+	db.posCallOwn = false; db.posTotemicOwn = false; ns.callApply(); M.sync()
+	-- a drag that never started saves nothing; no drag in a fight
+	local xBefore = db.x
+	rawset(overlayFor("bar"), "GetLeft", function() return 5 end); rawset(overlayFor("bar"), "GetBottom", function() return 5 end)
+	overlayFor("bar").scripts.OnDragStop(overlayFor("bar"))
+	check(db.x == xBefore, "move: a stop with no start saves nothing")
+	local sm = 0
+	rawset(overlayFor("bar"), "StartMoving", function() sm = sm + 1 end)
+	inCombat = true
+	overlayFor("bar").scripts.OnDragStart(overlayFor("bar"))
+	overlayFor("bar").scripts.OnDragStop(overlayFor("bar"))
+	check(db.x == xBefore and M.dragging == nil and sm == 0, "move: no drag in a fight")
+	inCombat = false
+	-- a fight that starts in the middle of a drag: nothing is saved
+	overlayFor("bar").scripts.OnDragStart(overlayFor("bar"))
+	rawset(overlayFor("bar"), "GetSize", function() return 150, 40 end)
+	inCombat = true
+	overlayFor("bar").scripts.OnDragStop(overlayFor("bar"))
+	check(db.x == xBefore, "move: a drag cut short by a fight saves nothing")
+	inCombat = false
+	rawset(overlayFor("bar"), "StartMoving", nil)
+
+	-- an error in one drop is logged, not thrown
+	local realDrop = M.overlays.cures.piece.drop
+	M.overlays.cures.piece.drop = function() error("boom") end
+	local okd = pcall(drag, overlayFor("cures"), 1, 1)
+	check(okd and lineCount("MOVE cures to .* FAILED") == 1, "move: a failing drop is logged, not thrown")
+	M.overlays.cures.piece.drop = realDrop
+
+	-- a fight ends the mode
+	local evf
+	for _, f in ipairs(frames) do
+		local n = 0
+		if f.registered then for _ in pairs(f.registered) do n = n + 1 end end
+		if n == 1 and f.registered.PLAYER_REGEN_DISABLED and f.scripts.OnEvent then evf = f end
+	end
+	check(evf ~= nil, "move: a frame listens for a fight starting")
+	inCombat = true
+	evf.scripts.OnEvent(evf, "PLAYER_REGEN_DISABLED")
+	check(M.on == false and ns.moveMode == false and not overlayFor("bar").shown and M.panel.shown == false, "move: a fight starting ends it and puts the frames away")
+	inCombat = false
+
+	local latest = allCats[#allCats - 4].panel                    -- a page of the newest build of the settings (an earlier test rebuilt them)
+	-- Done: the settings window comes back, the samples go when no page is open
+	reopened = 0
+	setup(); settle()
+	ns.moveStart()
+	M.panel.done.scripts.OnClick()
+	check(M.on == false and ns.moveMode == false and ns.optionsOpen == false, "move: Done ends it; the samples go (no page is open)")
+	check(reopened == 1, "move: ...and the settings window comes back")
+	latest.scripts.OnShow()
+	ns.moveStart(); ns.moveStop()
+	check(ns.optionsOpen == true, "move: a settings page that is open keeps the samples up after Done")
+	latest.scripts.OnHide()
+	check(ns.optionsOpen == false, "move: ...until it closes")
+	ns.moveStart()
+	M.panel.scripts.OnHide()
+	check(M.on == false and ns.moveMode == false, "move: Esc (hiding the panel) is Done")
+	latest.scripts.OnShow()
+	ns.moveStart()
+	latest.scripts.OnHide()
+	check(ns.optionsOpen == true, "move: the settings window closing as move mode starts keeps the samples up")
+	ns.moveStop()
+	latest.scripts.OnHide()
+	ns.openOptions = realOpen
+	SettingsPanel = nil
+
+	-- Reset all
+	setup(); db.x, db.y, db.cureX, db.callX, db.auxX, db.posRecallX = 11, 22, 33, 44, 55, 66
+	ns.moveStart()
+	M.panel.reset.scripts.OnClick()
+	check(db.x == ns.defaults.x and db.y == ns.defaults.y and db.cureX == ns.defaults.cureX and db.auxX == ns.defaults.auxX and db.callX == ns.defaults.callX and db.posRecallX == ns.defaults.posRecallX, "move: Reset all puts every piece back in its usual place")
+	inCombat = true
+	db.x = 7; M.panel.reset.scripts.OnClick()
+	check(db.x == 7, "move: Reset all does nothing in a fight")
+	inCombat = false
+	ns.moveStop()
+
+	SlashCmdList.SHAMANKIT("move")
+	check(M.on == true, "move: /shamankit move starts it")
+	ns.moveStop()
+
+	-- the panel refreshes now and then, and ends the mode in a fight
+	ns.moveStart()
+	local calls = 0
+	local realSync = M.sync
+	M.sync = function() calls = calls + 1 end
+	M.panel.scripts.OnUpdate(M.panel, 0.2)
+	check(calls == 0, "move: the panel is light: nothing before half a second")
+	M.panel.scripts.OnUpdate(M.panel, 0.4)
+	check(calls == 1, "move: ...then one refresh")
+	M.dragging = {}
+	M.panel.scripts.OnUpdate(M.panel, 0.6)
+	check(calls == 1, "move: no refresh while a frame is being dragged")
+	M.dragging = nil
+	M.sync = realSync
+	inCombat = true
+	M.panel.scripts.OnUpdate(M.panel, 0.6)
+	check(M.on == false, "move: the panel itself ends the mode if a fight is under way")
+	inCombat = false
+
+	-- nothing to move
+	rawset(_G.ShamanKitBar, "GetRect", function() return nil end)
+	db.shieldOn = false; db.weaponOn = false; db.cureOn = false; db.callOn = false; db.callTotemic = false
+	ns.callApply(); ns.cureApply()
+	rawset(_G.ShamanKitCalls, "GetRect", function() return nil end)
+	ns.moveStart()
+	check(M.panel.warn.text:find("Nothing is on screen"), "move: nothing to move: the panel says how to get something")
+	ns.moveStop()
+	rawset(_G.ShamanKitBar, "GetRect", nil); rawset(_G.ShamanKitCalls, "GetRect", nil)
+	noErrors("move: nothing raised an error in the log")
+	setup()
+	IsPlayerSpell = nil
 end
 
 -- what ships: the author's own layout (a fresh install gets this; saved settings are never overwritten)

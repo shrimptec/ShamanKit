@@ -554,6 +554,7 @@ local function apply()
 	S.shown = {}
 	for _, k in ipairs(kinds) do S.shown[#S.shown + 1] = k[1] end
 
+	S.grouped = grouped
 	-- the group: as long as the buttons that are in it
 	local n = #kinds
 	local g = S.group
@@ -666,4 +667,30 @@ function ns.callInfo()
 	out[#out + 1] = ("placed: %s, shown %s, %d%% size"):format(mode() == "free" and "in their own place" or ("beside the totem bar (" .. tostring(S.side) .. ")"),
 		db.callShow == "bar" and "only while a totem is out" or "all the time", clamp(db.callScale, 50, 150, 100))
 	return out
+end
+
+-- Move mode (Move.lua): the group of buttons, and each button placed on its own. Moving one makes it a place of its own
+-- (its "Attach to" becomes "Own place").
+ns.moveProviders[#ns.moveProviders + 1] = function()
+	local list = {}
+	if not (db and S.group) then return list end
+	list[#list + 1] = { id = "calls", label = "Call buttons", frame = S.group, on = function() return (S.grouped or 0) > 0 and S.group:IsShown() end,
+		hint = mode() ~= "free" and "They sit at the totem bar now; moving them gives them a place of their own." or nil,
+		drop = function(cx, cy)
+			db.callAnchor = "free"
+			db.callPoint, db.callRelPoint, db.callX, db.callY = "CENTER", "CENTER", cx, cy
+			ns.callApply()
+		end }
+	for _, kind in ipairs({ "call", "totemic", "recall" }) do
+		local b, k = S.buttons[kind], POS[kind]
+		list[#list + 1] = { id = "call_" .. kind, frame = b,
+			label = (kind == "call" and "Call of the ..." or kind == "totemic" and TOTEMIC.label or RECALL.label),
+			on = function() return ownOf(kind) and b:IsShown() end,
+			drop = function(cx, cy)
+				db[k .. "Anchor"] = "free"
+				db[k .. "Point"], db[k .. "RelPoint"], db[k .. "X"], db[k .. "Y"] = "CENTER", "CENTER", cx, cy
+				ns.callApply()
+			end }
+	end
+	return list
 end

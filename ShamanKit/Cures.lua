@@ -82,7 +82,7 @@ local function short(m) m = tostring(m):gsub("%s+", " "); return m:sub(1, 80) en
 -- Moving the row: the frames are unlocked AND a ShamanKit settings page is open. An unlocked bar alone does not put the row
 -- on screen (it would sit there all the time), and while it is being moved nothing is clickable.
 local function movingRow()
-	return db.locked == false and ns.optionsOpen == true
+	return (db.locked == false or ns.moveMode == true) and ns.optionsOpen == true
 end
 
 -- the frames and the container may only be touched out of combat, and never while the game hides auras
@@ -933,4 +933,14 @@ if not conflict() then
 	SLASH_SHAMANKITCURE1 = "/curewatch"
 	SLASH_SHAMANKITCURE2 = "/cw"
 	SlashCmdList.SHAMANKITCURE = function(msg) ns.cureSlash(msg) end
+end
+
+-- Move mode (Move.lua): the icon row; moving it saves the middle of the row
+ns.moveProviders[#ns.moveProviders + 1] = function()
+	if not (db and S.row) then return {} end
+	return { { id = "cures", label = "Cure row", frame = S.row, on = function() return db.cureOn and db.cureRow and true or false end,
+		drop = function(cx, cy)
+			db.curePoint, db.cureRelPoint, db.cureX, db.cureY = "CENTER", "CENTER", cx, cy
+			ns.cureApply()
+		end } }
 end

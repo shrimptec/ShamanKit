@@ -15,6 +15,8 @@ local MAX_SLOTS = MAX_TOTEMS or 4
 local TICK = 0.2
 local OUT_COLOR = { 0.8, 0.1, 0.1 }   -- the default action-button "out of range" red
 
+ns.moveProviders = {}      -- each module lists the pieces Move mode can drag (Move.lua)
+
 ns.defaults = {
 	size = 46,
 	spacing = 6,
@@ -1693,6 +1695,30 @@ end
 
 function ns.get() return db end
 
+-- Move mode (Move.lua): the totem bar and the buff icons. A piece that sat on the bar or the player frame gets a place of its own.
+ns.moveProviders[#ns.moveProviders + 1] = function()
+	local list = {}
+	if bar then
+		list[#list + 1] = { id = "bar", label = "Totem bar", frame = bar,
+			hint = db.attach and "It is under the player frame now; moving it switches that off." or nil,
+			drop = function(cx, cy)
+				db.attach = false
+				db.point, db.relPoint, db.x, db.y = "CENTER", "CENTER", cx, cy
+				ns.updatePreview()
+			end }
+	end
+	if aux then
+		list[#list + 1] = { id = "buffs", label = "Buff icons", frame = aux, on = function() return db.shieldOn or db.weaponOn end,
+			hint = auxMode() ~= "free" and "They sit on the bar or the player frame now; moving them gives them a place of their own." or nil,
+			drop = function(cx, cy)
+				db.auxAnchor = "free"
+				db.auxPoint, db.auxRelPoint, db.auxX, db.auxY = "CENTER", "CENTER", cx, cy
+				ns.updatePreview()
+			end }
+	end
+	return list
+end
+
 -- Reordering (settings panel). `pos` is the place in the bar (1 = first), `delta` -1 = earlier, +1 = later.
 function ns.moveSlot(pos, delta)
 	local o = fixOrder()
@@ -1936,6 +1962,8 @@ SlashCmdList.SHAMANKIT = function(msg)
 		db.locked = msg == "lock"
 		ns.updatePreview()
 		print("|cff33ff99ShamanKit|r: frame " .. (db.locked and "locked" or "unlocked - open /shamankit to see and drag it"))
+	elseif msg == "move" then
+		if ns.moveStart then ns.moveStart() end
 	elseif msg == "reset" then
 		ns.resetPosition()
 	elseif msg == "status" then

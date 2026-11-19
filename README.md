@@ -11,6 +11,10 @@ Small helpers for shamans, for World of Warcraft: Forever, in the default UI sty
   about to run out), or, if you prefer, shows which enchant is on and its time left, like the shield icon (main hand,
   hidden when dead, with no weapon or a fishing pole). The other icon shows your Lightning Shield charges while it is up. They can hang on the totem bar or the player frame (any side, any alignment, nudge and size are settings)
   or sit in a place of their own that you drag.
+- **Move mode**: one "Move on screen" button on every settings page (or `/shamankit move`) puts the totem bar, the buff
+  icons, the cure row and the Call buttons on screen at once as labelled frames you drag where you want them. Pieces that
+  sit on top of each other turn red and are named. Moving something that sat on the bar or the player frame gives it a
+  place of its own. It is for out of combat only, and a fight ends it.
 - **Call spells**: optional buttons at the totem bar (any side, any alignment, nudge and size are settings) or in a place of
   their own that you drag, shown all the time or only while a totem is out (and each button can be given a position
   of its own, apart from the others): one for Call of the Elements /
