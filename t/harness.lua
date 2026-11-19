@@ -252,8 +252,10 @@ local ns = {}
 local function load(file) local f = assert(loadfile(file)); f("ShamanKit", ns) end
 load("ShamanKit/ShamanKit.lua")
 load("ShamanKit/Cures.lua")
+load("ShamanKit/Calls.lua")
 load("ShamanKit/Options.lua")
 load("ShamanKit/CureOptions.lua")
+load("ShamanKit/CallOptions.lua")
 
 local ev
 for _, f in ipairs(frames) do if f.scripts.OnEvent then ev = f end end
@@ -275,7 +277,7 @@ fire("ADDON_LOADED", "ShamanKit")
 rawset(_G.ShamanKitBar, "protected", true)
 check(ShamanKitDB and ShamanKitDB.size == 36, "defaults filled")
 check(savedCat ~= nil, "settings category registered")
-check(#allCats == 5, "settings: a home page and four sub-pages (" .. #allCats .. " registered)")
+check(#allCats == 6, "settings: a home page and five sub-pages (" .. #allCats .. " registered)")
 -- the older checks talk to "the panel": that is now all three pages at once
 do
 	local pages = {}
@@ -1317,6 +1319,258 @@ do
 
 	C_UnitAuras.GetAuraDataBySpellName = real
 	clear(); ShamanKitDB.distanceMode = "bar"; ShamanKitDB.log = {}
+end
+
+-- ---- Calls: buttons for Call of the ..., Totemic Call and Totemic Recall beside the bar (Calls.lua)
+do
+	local db = ShamanKitDB
+	local S = ns.callState
+	local CE, CA, CS, TC, TR = 66842, 66843, 66844, 437009, 36936
+	KNOWN_SPELLS[CE] = "Call of the Elements"; KNOWN_SPELLS[CA] = "Call of the Ancestors"; KNOWN_SPELLS[CS] = "Call of the Spirits"
+	KNOWN_SPELLS[TC] = "Totemic Call"; KNOWN_SPELLS[TR] = "Totemic Recall"
+	CALL_KNOWN = { [CE] = true, [CA] = true, [TC] = true, [TR] = true }
+	function IsPlayerSpell(id) return CALL_KNOWN[id] == true end
+	MOUSE_OVER = false
+	function MouseIsOver() return MOUSE_OVER end
+	UISpecialFrames = {}
+	local cf
+	for _, f in ipairs(frames) do if f.registered and f.registered.SPELLS_CHANGED and f.registered.SPELL_UPDATE_COOLDOWN and not f.registered.ACTIONBAR_SLOT_CHANGED then cf = f end end
+	assert(cf, "the Calls frame registered its events")
+	local function cfire(e, ...) cf.scripts.OnEvent(cf, e, ...) end
+	local function bt(i) return _G["ShamanKitCall" .. i] end
+	local function lines2(pat) local n = 0; for _, l in ipairs(db.log or {}) do if l:find(pat) then n = n + 1 end end return n end
+	local function reset()
+		inCombat = false; AURAS_HIDDEN = false
+		db.callOn, db.callTotemic, db.callRecall, db.callSide, db.callChoice = false, false, false, "start", 0
+		db.vertical, db.size, db.spacing = false, 36, 4
+		db.shieldOn, db.weaponOn, db.auxAnchor, db.auxSide = true, true, "bar", "auto"
+		CALL_KNOWN = { [CE] = true, [CA] = true, [TC] = true, [TR] = true }
+		MOUSE_OVER = false
+		ns.callCloseFlyout()
+		ns.callApply()
+	end
+
+	-- defaults: nothing on, nothing in the way
+	check(ns.defaults.callOn == false and ns.defaults.callTotemic == false and ns.defaults.callRecall == false, "calls: every button is off until you switch it on")
+	check(ns.defaults.callSide == "start" and ns.defaults.callChoice == 0, "calls: before the totems, the first Call you know")
+	reset()
+	check(S.group ~= nil and S.group.name == "ShamanKitCalls", "calls: the group frame exists")
+	rawset(S.group, "protected", true)                       -- it holds secure buttons: the game restricts it in a fight
+	check(not bt(1).shown and not bt(2).shown and not bt(3).shown and bt(1).mouse == false and S.group.shown == false, "calls: all off: nothing on screen, nothing takes a click")
+	check(bt(1).tmpl == "SecureActionButtonTemplate" and bt(1).parentFrame == S.group, "calls: the buttons are the game's secure buttons, in the group")
+
+	-- the Call button
+	db.callOn = true; ns.callApply()
+	local b1 = bt(1)
+	check(b1.shown and b1.mouse == true and S.group.shown == true, "calls: Call of the ... on: the button shows and takes the mouse")
+	check(b1.attrs.type1 == "spell" and b1.attrs.spell1 == "Call of the Elements", "calls: a click casts Call of the Elements (the first you know)")
+	check(b1.icon.tex == 100000 + CE, "calls: its picture is the spell's")
+	check(b1.w == 36 and b1.h == 36, "calls: sized like the totem icons")
+	check(S.group.anchor[1] == "TOPRIGHT" and S.group.anchor[2] == _G.ShamanKitBar and S.group.anchor[3] == "TOPLEFT" and S.group.anchor[4] == -6 and S.group.anchor[5] == 0, "calls: before the totems: the group's right edge sits 6 px left of the bar")
+	check(S.arrow.shown, "calls: two Call spells known: the arrow is there")
+	check(not bt(2).shown and not bt(3).shown, "calls: the others stay off")
+
+	-- choosing another one from the arrow's list
+	S.arrow.scripts.OnClick(S.arrow)
+	local fly = S.flyout
+	check(fly and fly.shown and fly.items[1].shown and fly.items[1].callId == CA and not (fly.items[2] and fly.items[2].shown), "calls: the arrow opens a list of the OTHER Call spells (Ancestors)")
+	check(fly.items[1].icon.tex == 100000 + CA, "calls: with their pictures")
+	check(fly.name == "ShamanKitCallFlyout" and UISpecialFrames[1] == "ShamanKitCallFlyout", "calls: Esc closes the list")
+	fly.items[1].scripts.OnClick(fly.items[1])
+	check(db.callChoice == CA and b1.attrs.spell1 == "Call of the Ancestors" and b1.icon.tex == 100000 + CA, "calls: picking Ancestors makes the button cast it")
+	check(not fly.shown, "calls: ...and the list closes")
+	ns.callApply()
+	check(b1.attrs.spell1 == "Call of the Ancestors", "calls: the choice stays")
+	S.arrow.scripts.OnClick(S.arrow)
+	check(fly.items[1].callId == CE, "calls: now the list offers Elements")
+	ns.callCloseFlyout()
+	-- a choice you can't use any more: back to the first you know
+	db.callChoice = CS; ns.callApply()
+	check(b1.attrs.spell1 == "Call of the Elements", "calls: a Call spell you don't know is never cast: the first you know")
+	-- one known: no arrow, no list
+	CALL_KNOWN[CA] = nil; ns.callApply()
+	check(not S.arrow.shown, "calls: one Call spell known: no arrow")
+	S.arrow.scripts.OnClick(S.arrow)
+	check(not fly.shown, "calls: ...and the list does not open")
+	-- learning another (level up) while playing
+	CALL_KNOWN[CA] = true; CALL_KNOWN[CS] = true
+	cfire("SPELLS_CHANGED"); runTimers()
+	check(S.arrow.shown and #S.choices == 3, "calls: learning a Call spell updates the button (3 known)")
+	S.arrow.scripts.OnClick(S.arrow)
+	check(fly.items[1].shown and fly.items[2].shown and fly.items[1].callId ~= fly.items[2].callId, "calls: the list then has the other two")
+	ns.callCloseFlyout()
+	CALL_KNOWN[CS] = nil; db.callChoice = 0; cfire("SPELLS_CHANGED"); runTimers()
+
+	-- which way the list opens: away from the nearer screen edge
+	local function openWith(cx, cy)
+		rawset(b1, "GetCenter", function() return cx, cy end)
+		rawset(UIParent, "GetCenter", function() return 960, 540 end)
+		ns.callCloseFlyout(); S.arrow.scripts.OnClick(S.arrow)
+		local a = fly.anchor
+		local ar = S.arrow.anchor
+		ns.callCloseFlyout()
+		return a, ar
+	end
+	local a, ar = openWith(500, 100)
+	check(a[1] == "BOTTOMLEFT" and a[3] == "TOPLEFT" and ar[1] == "BOTTOM" and ar[3] == "TOP", "calls: a bar low on the screen: the list opens upward, the arrow is on top")
+	a, ar = openWith(500, 900)
+	check(a[1] == "TOPLEFT" and a[3] == "BOTTOMLEFT" and ar[1] == "TOP" and ar[3] == "BOTTOM", "calls: a bar high up: it opens downward, the arrow below")
+	db.vertical = true; ns.callApply()
+	a, ar = openWith(300, 500)
+	check(a[1] == "TOPLEFT" and a[3] == "TOPRIGHT" and ar[1] == "LEFT" and ar[3] == "RIGHT", "calls: a vertical bar on the left: it opens to the right, the arrow on that side")
+	a, ar = openWith(1600, 500)
+	check(a[1] == "TOPRIGHT" and a[3] == "TOPLEFT" and ar[1] == "RIGHT" and ar[3] == "LEFT", "calls: ...on the right: to the left")
+	rawset(b1, "GetCenter", nil); rawset(UIParent, "GetCenter", nil)
+	db.vertical = false; ns.callApply()
+	-- the list goes away by itself when the mouse is not near it
+	S.arrow.scripts.OnClick(S.arrow)
+	MOUSE_OVER = true
+	for _ = 1, 20 do fly.scripts.OnUpdate(fly, 0.2) end
+	check(fly.shown, "calls: the list stays while the mouse is on it")
+	MOUSE_OVER = false
+	for _ = 1, 6 do fly.scripts.OnUpdate(fly, 0.2) end
+	check(not fly.shown, "calls: ...and closes when the mouse has been away a moment")
+
+	-- the other two buttons, in order
+	db.callTotemic = true; db.callRecall = true; ns.callApply()
+	local b2, b3 = bt(2), bt(3)
+	check(b1.shown and b2.shown and b3.shown, "calls: all three on screen")
+	check(b1.anchor[4] == 0 and b2.anchor[4] == 40 and b3.anchor[4] == 80, "calls: Call, Totemic Call, Totemic Recall, spaced by size + gap")
+	check(b2.attrs.spell1 == "Totemic Call" and b3.attrs.spell1 == "Totemic Recall" and b2.attrs.type1 == "spell", "calls: each casts its own spell")
+	check(b2.icon.tex == 100000 + TC and b3.icon.tex == 100000 + TR, "calls: with their pictures")
+	check(S.group.w == 3 * 36 + 2 * 4 and S.group.h == 36, "calls: the group is as long as the buttons")
+	db.callOn = false; ns.callApply()
+	check(not b1.shown and b1.attrs.type1 == nil and b1.attrs.spell1 == nil and b1.mouse == false and not S.arrow.shown, "calls: Call off: its button, click and arrow are gone")
+	check(b2.anchor[4] == 0 and b3.anchor[4] == 40 and S.group.w == 2 * 36 + 4, "calls: the rest close up")
+	db.callOn = true
+	CALL_KNOWN[TR] = nil; ns.callApply()
+	check(not b3.shown and b3.attrs.spell1 == nil and b3.mouse == false, "calls: a spell you don't know has no button, even switched on")
+	CALL_KNOWN[TR] = true; ns.callApply()
+	check(b3.shown and b3.attrs.spell1 == "Totemic Recall", "calls: and does when you learn it")
+	CALL_KNOWN[TC] = nil; ns.callApply()
+	check(not b2.shown and b2.attrs.spell1 == nil and b2.mouse == false and b3.anchor[4] == 40, "calls: Totemic Call not known: no button, Recall moves up")
+	CALL_KNOWN[TC] = true; ns.callApply()
+	check(b2.shown and b2.attrs.spell1 == "Totemic Call", "calls: and it comes back when you learn it")
+	db.callTotemic = false; ns.callApply()
+	check(not b2.shown and b3.anchor[4] == 40, "calls: Totemic Call off: Recall moves up")
+	db.callTotemic = true; ns.callApply()
+
+	-- where the group sits
+	local full = 4 * 36 + 3 * 4
+	db.callSide = "end"; ns.callApply()
+	check(S.group.anchor[1] == "TOPLEFT" and S.group.anchor[3] == "TOPLEFT" and S.group.anchor[4] == full + 6, "calls: after the totems: past all four places (" .. tostring(S.group.anchor[4]) .. ")")
+	db.vertical = true; db.callSide = "start"; ns.callApply()
+	check(S.group.anchor[1] == "BOTTOMLEFT" and S.group.anchor[3] == "TOPLEFT" and S.group.anchor[5] == 6, "calls: vertical bar, before: above it")
+	check(b2.anchor[5] == -40 and b2.anchor[4] == 0 and S.group.h == 3 * 36 + 2 * 4 and S.group.w == 36, "calls: the buttons stack down")
+	db.callSide = "end"; ns.callApply()
+	check(S.group.anchor[1] == "TOPLEFT" and S.group.anchor[5] == -(full + 6), "calls: vertical bar, after: below the places")
+	db.vertical = false; db.callSide = "start"; ns.callApply()
+	-- the buff icons on the same end: the buttons take the other one
+	db.shieldOn = true; db.auxAnchor = "bar"; db.auxSide = "left"
+	ns.callApply()
+	check(S.side == "end" and S.sideMoved == true and S.group.anchor[1] == "TOPLEFT", "calls: buff icons at the start: the buttons go to the end")
+	db.callSide = "end"; db.auxSide = "right"; ns.callApply()
+	check(S.side == "start" and S.sideMoved == true, "calls: buff icons at the end: the buttons go to the start")
+	db.shieldOn = false; db.weaponOn = false; ns.callApply()
+	check(S.side == "end" and not S.sideMoved, "calls: both buff icons off: nothing in the way")
+	db.shieldOn = true; db.auxAnchor = "player"; ns.callApply()
+	check(S.side == "end" and not S.sideMoved, "calls: buff icons on the player frame: nothing in the way")
+	db.auxAnchor = "bar"; db.auxSide = "bottom"; ns.callApply()
+	check(S.side == "end" and not S.sideMoved, "calls: buff icons under the bar: nothing in the way")
+	db.callSide = "start"; db.auxSide = "auto"; ns.callApply()
+
+	-- a fight: none of the secure buttons or their group is touched (the game would refuse and show a popup)
+	local writes = 0
+	for _, b in ipairs({ b1, b2, b3 }) do
+		local orig = b.SetAttribute
+		rawset(b, "SetAttribute", function(self, k, v) writes = writes + 1; return orig(self, k, v) end)
+	end
+	local sizeBefore, anchorBefore, spellBefore = S.group.w, S.group.anchor, b1.attrs.spell1
+	inCombat = true; AURAS_HIDDEN = true; cfire("PLAYER_REGEN_DISABLED")
+	db.callOn = false; db.callTotemic = false; db.callSide = "end"; db.size = 50; db.callChoice = CA
+	local okc, errc = pcall(function() ns.updatePreview(); cfire("SPELLS_CHANGED"); runTimers(); ns.callApply() end)
+	check(okc, "calls fight: settings changed in a fight raise no error (" .. tostring(errc) .. ")")
+	check(writes == 0 and S.group.w == sizeBefore and S.group.anchor == anchorBefore and b1.attrs.spell1 == spellBefore and b1.shown, "calls fight: buttons, spell, size and place are left exactly as they were")
+	check(S.pending == true, "calls fight: the change is waiting")
+	-- the pick list: nothing can change in a fight
+	S.arrow.scripts.OnClick(S.arrow)
+	check(not fly.shown, "calls fight: the list does not open")
+	fly.items[1].callId = CS
+	fly.items[1].scripts.OnClick(fly.items[1])
+	check(db.callChoice == CA, "calls fight: ...a pick is not acted on")
+	inCombat = false; AURAS_HIDDEN = false; cfire("PLAYER_REGEN_ENABLED"); runTimers()
+	check(writes > 0, "calls fight: after it the waiting changes are made")
+	check(not b1.shown and not b2.shown and b3.shown and b3.w == 50, "calls fight: ... buttons off, the size 50")
+	check(S.pending == false, "calls fight: nothing left waiting")
+	for _, b in ipairs({ b1, b2, b3 }) do rawset(b, "SetAttribute", nil) end
+	reset()
+	rawset(S.group, "protected", true)
+
+	-- a pick list that is open when a fight starts closes
+	db.callOn = true; ns.callApply()
+	S.arrow.scripts.OnClick(S.arrow)
+	check(fly.shown, "calls: list open")
+	inCombat = true; cfire("PLAYER_REGEN_DISABLED")
+	check(not fly.shown, "calls fight: a fight starting closes the list")
+	inCombat = false; cfire("PLAYER_REGEN_ENABLED"); runTimers()
+
+	-- cooldowns: in a fight too, passed straight through
+	COOLDOWNS = {}
+	C_Spell.GetSpellCooldown = function(id) return COOLDOWNS[id] end
+	COOLDOWNS[CE] = { startTime = t - 5, duration = 30 }
+	cfire("SPELL_UPDATE_COOLDOWN"); runTimers()
+	check(b1.cd.cd and b1.cd.cd[1] == t - 5 and b1.cd.cd[2] == 30, "calls: the cooldown sweeps on the button")
+	inCombat = true
+	COOLDOWNS[CE] = { startTime = secret(), duration = secret() }
+	local okcd, ecd = pcall(function() cfire("SPELL_UPDATE_COOLDOWN"); runTimers() end)
+	check(okcd, "calls fight: secret cooldown numbers go straight through without an error (" .. tostring(ecd) .. ")")
+	COOLDOWNS[CE] = { startTime = t - 1, duration = 20 }
+	cfire("SPELL_UPDATE_COOLDOWN"); runTimers()
+	check(b1.cd.cd[2] == 20, "calls fight: the sweep follows in a fight")
+	inCombat = false
+	local timersBefore = #timers
+	for _ = 1, 40 do cfire("SPELL_UPDATE_COOLDOWN") end
+	check(#timers - timersBefore == 1, "calls: a burst of cooldown events is one pass")
+	runTimers()
+	COOLDOWNS[CE] = nil
+
+	-- the settings page
+	local page = savedCat.pages[6]
+	check(page ~= nil and ns.categories and ns.categories.calls ~= nil, "calls settings: a Call spells page is registered (the sixth)")
+	local function boxFor(key) for _, f in ipairs(frames) do if f.settingKey == key and f.parentFrame == page then return f end end end
+	for _, key in ipairs({ "callOn", "callTotemic", "callRecall" }) do check(boxFor(key) ~= nil, "calls settings: a box for " .. key) end
+	reset(); page.OnRefresh()
+	local onBox = boxFor("callOn")
+	check(onBox.checked == false, "calls settings: shows off")
+	onBox:SetChecked(true); onBox.scripts.OnClick(onBox)
+	check(db.callOn == true and b1.shown, "calls settings: ticking it puts the button on screen at once")
+	local radios = {}
+	for _, f in ipairs(frames) do if f.value and f.parentFrame == page and (f.value == "start" or f.value == "end") then radios[f.value] = f end end
+	check(radios.start and radios["end"], "calls settings: before / after choices")
+	radios["end"].scripts.OnClick(radios["end"])
+	check(db.callSide == "end" and S.group.anchor[4] == full + 6, "calls settings: 'after the totems' moves the buttons")
+	db.callTotemic = true; db.callRecall = true; db.callChoice = CA; db.callSide = "end"
+	page.OnDefault()
+	check(db.callOn == false and db.callTotemic == false and db.callRecall == false and db.callSide == "start" and db.callChoice == 0, "calls settings: Defaults restores this page's settings")
+	check(not b1.shown and not b2.shown, "calls settings: ...and the buttons go away")
+	-- status
+	local info = ns.callInfo()
+	local blob = table.concat(info, "\n")
+	check(blob:find("Call of the Elements: you have it") and blob:find("Call of the Spirits: you don't have it") and blob:find("Call button casts: Call of the Elements"), "calls status: what you have and what the button casts")
+	local out = {}
+	local pr = print; print = function(...) out[#out + 1] = table.concat({ ... }, " ") end
+	SlashCmdList.SHAMANKIT("status")
+	print = pr
+	local joined = table.concat(out, "\n")
+	check(joined:find("calls: Call of the Elements: you have it"), "calls status: /shamankit status lists them")
+	-- the events are real names on this client
+	local want = { PLAYER_ENTERING_WORLD = true, SPELLS_CHANGED = true, PLAYER_LEVEL_UP = true, SPELL_UPDATE_COOLDOWN = true, PLAYER_REGEN_ENABLED = true, PLAYER_REGEN_DISABLED = true }
+	local okEv = true
+	for _, e in ipairs(ns.CALL_EVENTS) do if not want[e] then okEv = false end end
+	check(okEv and #ns.CALL_EVENTS == 6, "calls: only events this client has")
+	noErrors("calls: nothing raised an error in the log")
+	reset()
+	IsPlayerSpell = nil                                       -- the cures tests are about a client that does not say
 end
 
 -- ---- Cures: the cure spells light up while something they can remove is on you (Cures.lua)
@@ -2611,7 +2865,7 @@ do
 		Settings.RegisterCanvasLayoutSubcategory = nil
 		ns.buildOptions()
 		Settings.RegisterCanvasLayoutSubcategory = sub
-		check(#allCats == before + 5, "no sub-page support: the pages become categories of their own")
+		check(#allCats == before + 6, "no sub-page support: the pages become categories of their own")
 	end
 
 	-- /shamankit status prints both readings

@@ -5,6 +5,7 @@
 --   Totems      order of the totems, keeping a place open, the placeholder icon
 --   Buffs       the weapon-enchant and Lightning Shield icons
 --   Cures       your cure spells lighting up (CureOptions.lua)
+--   Call spells buttons for Call of the ..., Totemic Call and Totemic Recall next to the bar (CallOptions.lua)
 
 local ADDON, ns = ...
 
@@ -185,7 +186,7 @@ function ns.buildOptions()
 
 	-- ------------------------------------------------------------ home page
 	local home = newPage("ShamanKit", "ShamanKit",
-		"Small helpers for shamans: your totems, reminders for your weapon enchant and Lightning Shield, and your cure spells.", {})
+		"Small helpers for shamans: your totems, reminders for your weapon enchant and Lightning Shield, your cure spells, and buttons for your Call spells.", {})
 	local p0 = home.panel
 	local getMeta = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
 	local okv, version = pcall(function() return getMeta and getMeta(ADDON, "Version") end)
@@ -203,8 +204,9 @@ function ns.buildOptions()
 	pageButton("Totems", "totems", -150, "The order of the totems, and a place kept open for each.")
 	pageButton("Buffs", "buffs", -184, "Icons for a missing weapon enchant and your Lightning Shield charges.")
 	pageButton("Cures", "cures", -218, "Your cure spells light up while a poison, disease or curse is on you.")
-	header(p0, "Commands", LEFT, -270, 580)
-	note(p0, "/shamankit - open this window\n/shamankit bar, totems, buffs or cures - open that page\n/shamankit cures test - light the cures for a few seconds (also /cw)\n/shamankit lock or unlock - lock the frames, or make them draggable\n/shamankit reset - put the bar, the buff icons and the cure row back in the usual place\n/shamankit status - print what the addon reads (for bug reports)", LEFT, -296)
+	pageButton("Call spells", "calls", -252, "Buttons for Call of the ..., Totemic Call and Totemic Recall at the bar.")
+	header(p0, "Commands", LEFT, -304, 580)
+	note(p0, "/shamankit - open this window\n/shamankit bar, totems, buffs, cures or calls - open that page\n/shamankit cures test - light the cures for a few seconds (also /cw)\n/shamankit lock or unlock - lock the frames, or make them draggable\n/shamankit reset - put the bar, the buff icons and the cure row back in the usual place\n/shamankit status - print what the addon reads (for bug reports)", LEFT, -330)
 
 	-- ------------------------------------------------------------ page 1: the totem bar
 	local main = newPage("Totem bar", "Totem bar",
@@ -467,7 +469,14 @@ function ns.buildOptions()
 	end)
 	if not okc then print("ShamanKit: the Cures page could not be built: " .. tostring(curesPage)); curesPage = nil end
 
-	-- ------------------------------------------------------------ register: one category, four sub-pages
+	-- ------------------------------------------------------------ page 5: the Call spell buttons (built in CallOptions.lua)
+	local okk, callsPage = pcall(function()
+		return ns.buildCallsPage and ns.buildCallsPage({ newPage = newPage, checkbox = checkbox, header = header, note = note,
+			enable = enable, radioGroup = radioGroup, LEFT = LEFT, RIGHT = RIGHT, COLW = COLW })
+	end)
+	if not okk then print("ShamanKit: the Call spells page could not be built: " .. tostring(callsPage)); callsPage = nil end
+
+	-- ------------------------------------------------------------ register: one category, five sub-pages
 	local category = Settings.RegisterCanvasLayoutCategory(p0, "ShamanKit")
 	Settings.RegisterAddOnCategory(category)
 	ns.category = category
@@ -487,10 +496,11 @@ function ns.buildOptions()
 		totems = register(totems, "Totems"),
 		buffs = register(icons, "Buffs"),
 		cures = curesPage and register(curesPage, "Cures") or nil,
+		calls = callsPage and register(callsPage, "Call spells") or nil,
 	}
 end
 
--- which: nil = the home page, or "bar", "totems", "buffs", "cures" (also "icons", the old name of the buffs page)
+-- which: nil = the home page, or "bar", "totems", "buffs", "cures", "calls" (also "icons", the old name of the buffs page)
 function ns.openOptions(which)
 	if not ns.category then print("ShamanKit: settings panel unavailable on this client.") return end
 	local c = (ns.categories and (ns.categories[which] or (which == "icons" and ns.categories.buffs))) or ns.category

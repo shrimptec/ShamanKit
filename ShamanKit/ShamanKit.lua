@@ -681,6 +681,7 @@ local function layout()
 	if db.vertical then bar:SetSize(s, long) else bar:SetSize(long, s) end
 	ns.refreshHolders()
 	if applyAux then applyAux() end
+	if ns.callApply then ns.callApply() end    -- the Call spell buttons sit at the bar's ends (Calls.lua)
 end
 
 local function setMark(b, r)
@@ -1061,6 +1062,7 @@ local function knownSpell(id)
 	end
 	return false
 end
+ns.knownSpell = knownSpell
 
 -- the picture on the weapon icon: the last enchant seen on the weapon (what you actually use), else the best
 -- imbue you know, else Rockbiter
@@ -1649,6 +1651,7 @@ end
 
 function ns.updatePreview()
 	if ns.cureApply then ns.cureApply() end
+	if ns.callApply then ns.callApply() end
 	applyAttach()
 	applyBarMouse()
 	applyAux()
@@ -1716,6 +1719,8 @@ local function build()
 	applyAttach()
 	buildAux()
 	layout()
+	ns.bar = bar
+	if ns.callInit then ns.callInit() end     -- the Call spell buttons (Calls.lua) need the bar to sit beside
 
 	local acc = 0
 	bar:SetScript("OnUpdate", function(_, elapsed)
@@ -1940,6 +1945,7 @@ SlashCmdList.SHAMANKIT = function(msg)
 		print(("|cff33ff99ShamanKit|r %s: %s%s (%s)"):format(shieldAuraName(), tostring(up),
 			(up == true and not isSecret(n)) and (", charges " .. tostring(n)) or "", db.shieldOn and "icon on" or "icon off"))
 		print("|cff33ff99ShamanKit|r shield icon: " .. ns.boxInfo())
+		if ns.callInfo then for _, line in ipairs(ns.callInfo()) do print("|cff33ff99ShamanKit|r calls: " .. line) end end
 	elseif ns.openOptions then
 		ns.openOptions(msg)   -- "bar", "totems" or "buffs" open that page
 	end
