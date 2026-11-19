@@ -4,7 +4,7 @@
 
 Small helpers for shamans, for World of Warcraft: Forever, in the default UI style.
 
-- **Totem bar**: each active totem with its time left and whether you are in range of it. A buff totem is judged by its buff when the game lets addons read it (out of a fight); otherwise by distance (a totem lands a little to one side of you, so right at the edge it is a best guess; there is no "?"). This is the "Watch the totem's buff" option on the Totem bar page (on by default); off goes back to judging by your drop spot alone. Can replace the default
+- **Totem bar**: each active totem with its time left and whether you are in range of it. A buff totem is judged by its buff when the game lets addons read it (out of a fight); otherwise by distance (a totem lands a little to one side of you, so the last few yards before the edge count as out: a lit icon means clearly inside; there is no "?"). This is the "Watch the totem's buff" option on the Totem bar page (on by default); off goes back to judging by your drop spot alone. Can replace the default
   totem timers under the player frame. Right-click a totem to dismiss it. With the bar locked, left-click a place to cast
   the totem it shows (the dim placeholder of a kept place, or a totem that is out), also in a fight; it can be switched off.
 - **Buffs**: two small optional icons. The weapon icon either pops up when your weapon has no enchant (or one that is

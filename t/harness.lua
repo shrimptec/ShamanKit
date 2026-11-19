@@ -1261,8 +1261,9 @@ do
 	calls = 0
 	at(10); check(mark(2) == "in", "range fight: 10 yd of 30: in")
 	at(22); check(mark(2) == "in", "range fight: 22 yd of 30 (a band of 4): still in")
-	at(27); check(mark(2) == "in", "range fight: 27 yd: near the edge, the best guess (the radius): in")
-	at(30); check(mark(2) == "in", "range fight: right at the edge: in (best guess)")
+	at(27); check(mark(2) == "out", "range fight: 27 yd: near the edge, the guess leans out (lit only while clearly inside, 26 of 30)")
+	at(25); check(mark(2) == "in", "range fight: 25 yd: still in")
+	at(30); check(mark(2) == "out", "range fight: right at the edge: out (best guess)")
 	at(33); check(mark(2) == "out", "range fight: 33 yd: near the edge, the best guess: out")
 	at(35); check(mark(2) == "out", "range fight: 35 yd: out")
 	check(calls == 0, "range fight: no aura read while the game hides them (" .. calls .. ")")
@@ -1272,11 +1273,12 @@ do
 	-- totems without a buff only have the position: the same band, narrower for a small totem
 	place(1, "Searing Totem")                              -- 20 yd, band 4
 	at(15); check(mark(1) == "in", "range: Searing, 15 of 20: in")
-	at(18); check(mark(1) == "in", "range: Searing, 18 of 20: in (best guess)")
+	at(15); check(mark(1) == "in", "range: Searing, 15 of 20: in")
+	at(18); check(mark(1) == "out", "range: Searing, 18 of 20: out (best guess leans out)")
 	at(25); check(mark(1) == "out", "range: Searing, 25 of 20: out")
 	place(1, "Earthbind Totem")                            -- 10 yd, band 3 (a third of it at most)
 	at(6); check(mark(1) == "in", "range: Earthbind, 6 of 10: in")
-	at(8); check(mark(1) == "in", "range: Earthbind, 8 of 10: in (best guess)")
+	at(8); check(mark(1) == "out", "range: Earthbind, 8 of 10: out (best guess leans out)")
 	at(14); check(mark(1) == "out", "range: Earthbind, 14 of 10: out")
 	place(1, "Stoneclaw Totem")                            -- 8 yd, band 2.4
 	at(5); check(mark(1) == "in", "range: Stoneclaw, 5 of 8: in")
@@ -3601,8 +3603,7 @@ do
 	pos = { y = 0, x = 40, map = 1 }; tick()
 	check(red(btn(1)), "edge: 40 yd from a 20 yd totem: red")
 	pos = { y = 0, x = 20, map = 1 }; tick()
-	check(plain(btn(1)) and btn(1).mark.shown == false and not waiting(btn(1)), "edge: at the edge: plain (best guess: in), no ?, the old red is not held (the position is readable)")
-	check(ns.barState(1).sure == false, "edge: a best guess is not remembered as a clear answer")
+	check(red(btn(1)) and not waiting(btn(1)), "edge: at the edge: red (best guess leans out), no ?")
 
 	-- learning where THIS totem's edge is: the buff read out of a fight narrows the "?" band for the next fight
 	clear(); BUFF_READS = true; pos = { y = 0, x = 0, map = 1 }; mapOn = true; t = t + 10
@@ -3615,7 +3616,7 @@ do
 	end
 	local function fightAt(x) AURAS_HIDDEN = true; inCombat = true; pos = { y = 0, x = x, map = 1 }; t = t + 1; tick() end
 	local function fightOver() AURAS_HIDDEN = false; inCombat = false end
-	fightAt(27); check(plain(btn(2)) and not waiting(btn(2)), "learn: before anything is learned 27 of 30 is a best guess: in, no ?"); fightOver()
+	fightAt(27); check(red(btn(2)) and not waiting(btn(2)), "learn: before anything is learned 27 of 30 is a best guess leaning out: red, no ?"); fightOver()
 	-- a walk away changes the learned edge every step: the log keeps one line per 5 s, not one per step
 	do
 		local function nEdge() local n = 0; for _, l in ipairs(ShamanKitLogDB.lines) do if l:find("EDGE learned") then n = n + 1 end end return n end
@@ -3668,11 +3669,13 @@ do
 	st2.lo, st2.hi = 31, nil; fightAt(30); check(plain(btn(2)) and not waiting(btn(2)), "learn: on at 31 only: 30 is in")
 	fightAt(33); check(red(btn(2)) and not waiting(btn(2)), "learn: ...and 33 is a best guess by the radius: out, no ?")
 	st2.lo, st2.hi = nil, 28; fightAt(29); check(red(btn(2)) and not waiting(btn(2)), "learn: off at 28 only: 29 is out")
-	fightAt(27); check(plain(btn(2)) and not waiting(btn(2)), "learn: ...and 27 is a best guess by the radius: in, no ?")
+	fightAt(27); check(red(btn(2)) and not waiting(btn(2)), "learn: ...and 27 is a best guess leaning out: red, no ?")
 	-- a wide gap is a guess at the middle
 	st2.lo, st2.hi = 26, 34; fightAt(29.5); check(plain(btn(2)) and not waiting(btn(2)), "learn: on at 26, off at 34: 29.5 is a best guess by the middle (30): in, no ?")
 	fightAt(30.5); check(red(btn(2)) and not waiting(btn(2)), "learn: ...30.5 is out, no ?")
 	st2.lo, st2.hi = 24, 32; fightAt(29); check(red(btn(2)) and not waiting(btn(2)), "learn: a wide gap is guessed at its middle (28), not at the radius (30)")
+	st2.sure = false; fightAt(27.5)
+	check(plain(btn(2)) and st2.sure == false, "learn: a guess of 'in' is not remembered as a clear answer")
 	fightAt(25); check(plain(btn(2)) and not waiting(btn(2)), "learn: ...25 is in")
 	fightAt(35); check(red(btn(2)) and not waiting(btn(2)), "learn: ...35 is out")
 	st2.lo, st2.hi = 31, 32; fightAt(30.5); check(plain(btn(2)) and not waiting(btn(2)), "learn: narrow gap: below the middle is in")

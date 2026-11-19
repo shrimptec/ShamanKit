@@ -521,8 +521,10 @@ local function rangeOf(slot, now)
 	elseif how then
 		r = byPos
 		if r == nil then
-			-- near the edge, no buff to ask: no "?", the best guess (this totem's learned edge if it has one, else its radius)
-			local edge = (s.lo and s.hi and s.lo < s.hi) and (s.lo + s.hi) / 2 or s.range
+			-- near the edge, no buff to ask: no "?". The position is only an estimate (a totem lands to your side), so the
+			-- guess leans OUT: lit only while clearly inside, so a lit icon means you have the buff. A totem that has
+			-- learned its edge uses the middle of what it learned.
+			local edge = (s.lo and s.hi and s.lo < s.hi) and (s.lo + s.hi) / 2 or (s.range - edgeBand(s.range))
 			r, guessed = dist <= edge, true
 			how = how .. ", near the edge (best guess)"
 		end
