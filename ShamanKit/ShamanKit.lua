@@ -481,7 +481,10 @@ local function rangeOf(slot, now)
 	else
 		how = "unknown"
 	end
-	local key = tostring(r) .. how .. tostring(buff ~= nil and byPos ~= nil and buff ~= byPos)
+	if r ~= nil then s.sure = r end                 -- the last clear answer
+	local held                                      -- no source at all (no position, buff hidden): the last clear answer stands, as a "?"
+	if r == nil and how == "unknown" then held = s.sure end
+	local key = tostring(r) .. how .. tostring(buff ~= nil and byPos ~= nil and buff ~= byPos) .. tostring(held)
 	if s.last ~= key then
 		s.last = key
 		if not now.mapRead then readMapPos(now) end   -- the log line wants both sources
@@ -490,7 +493,7 @@ local function rangeOf(slot, now)
 			slot, tostring(s.name), tostring(r), how, dist and ("%.1f"):format(dist) or "-", tostring(s.range),
 			tostring(byPos), describe(now), describe(was), tostring(InCombatLockdown()))
 	end
-	return r, how, dist
+	return r, how, dist, held
 end
 
 -- ---------------------------------------------------------------- buttons
@@ -510,12 +513,15 @@ local function tooltip(self)
 	if not shown then GameTooltip:SetText(buttons[self.slot].sampleName or "Totem") end
 	local s = state[self.slot]
 	if s and not previewing then
-		local r, how = rangeOf(self.slot)
+		local r, how, _, held = rangeOf(self.slot)
 		if r == nil and how:find("near the edge", 1, true) then
 			GameTooltip:AddLine(("Can't tell, near the edge of its %d yd (the totem lands a little to one side)"):format(s.range), 1, 1, 1)
 		else
 			local text = r == true and "In range" or r == false and "Out of range" or "Range unknown"
 			GameTooltip:AddLine(("%s (%d yd, by %s)"):format(text, s.range, how), 1, 1, 1)
+			if r == nil and held ~= nil then
+				GameTooltip:AddLine(("Last time it could be read you were %s. The game hides it in a fight here."):format(held and "in range" or "out of range"), 0.8, 0.8, 0.8, true)
+			end
 		end
 	end
 	GameTooltip:Show()
@@ -708,8 +714,10 @@ local function layout()
 end
 
 local function setMark(b, r)
-	-- check (in range) and cross (out of range) are separate options; "?" shows if either is on
-	local want = r == nil and (db.showRange or db.showOut) or (r and db.showRange) or (r == false and db.showOut)
+	-- check (in range) and cross (out of range) are separate options. The "?" (unknown) is NOT optional: with both marks
+	-- off, an unknown answer used to look exactly like "in range" (seen in a dungeon, where no position can be read and
+	-- the buff is hidden in a fight: every totem looked fine)
+	local want = r == nil or (r and db.showRange) or (r == false and db.showOut)
 	if not want then b.mark:Hide() return end
 	-- unknown gets its own yellow "?" so a blank is never mistaken for "in range"
 	b.mark:SetTexture(r == nil and "Interface\\RaidFrame\\ReadyCheck-Waiting"
@@ -771,14 +779,16 @@ local function invalidate(b)
 	b.pc, b.psr, b.pt, b.pd, b.pdc, b.pdv, b.pg, b.pgb, b.pm = nil, nil, nil, nil, nil, nil, nil, nil, nil
 end
 
-local function paintRange(b, r, dist, range)
+local function paintRange(b, r, dist, range, held)
 	local c = r == nil and 0 or (r and 1 or 2)
 	local showRange = (db.showRange and 1 or 0) + (db.showOut and 2 or 0)
 	if b.pc ~= c or b.psr ~= showRange then
 		b.pc, b.psr = c, showRange
 		setMark(b, r)
 	end
-	local tint = (r == false and db.tint) and true or false
+	-- an answer nobody can read (no position, buff hidden in a fight) keeps the last clear answer's tint: a totem that was
+	-- red when the fight began stays red, instead of lighting up as if you were next to it
+	local tint = ((r == false or (r == nil and held == false)) and db.tint) and true or false
 	if b.pt ~= tint then
 		b.pt = tint
 		if tint then b.icon:SetVertexColor(unpack(OUT_COLOR)) else b.icon:SetVertexColor(1, 1, 1) end
@@ -865,6 +875,7 @@ local function refreshSlot(slot, placed)
 	if placed then
 		s.at = playerPos()
 		s.t = GetTime()
+		s.sure = nil                       -- a new totem: what was last known belonged to the old one
 		s.last = nil
 		s.buffAt, s.buffVal = nil, nil     -- a new totem: the last buff reading belonged to the old one
 		local real = not isSecret(name) and type(name) == "string" and name ~= ""
@@ -958,8 +969,8 @@ local function tick()
 			else
 				any = true
 				if have then noticeReplaced(slot, visible, start) end
-				local r, _, d = rangeOf(slot, now)
-				paintRange(b, r, d, state[slot] and state[slot].range)
+				local r, _, d, held = rangeOf(slot, now)
+				paintRange(b, r, d, state[slot] and state[slot].range, held)
 			end
 		end
 	end
@@ -2000,9 +2011,10 @@ SlashCmdList.SHAMANKIT = function(msg)
 			local s = state[slot]
 			if s then
 				any = true
-				local r, how = rangeOf(slot)
-				print(("|cff33ff99ShamanKit|r slot %d: %s, radius %d, %s via %s"):format(slot, s.name or "?", s.range,
-					r == true and "in range" or r == false and "OUT of range" or "unknown", how))
+				local r, how, _, held = rangeOf(slot)
+				print(("|cff33ff99ShamanKit|r slot %d: %s, radius %d, %s via %s%s"):format(slot, s.name or "?", s.range,
+					r == true and "in range" or r == false and "OUT of range" or "unknown", how,
+					(r == nil and held ~= nil) and (held and " (last known: in range)" or " (last known: out of range)") or ""))
 			end
 		end
 		if not any then print("|cff33ff99ShamanKit|r: no active totems") end

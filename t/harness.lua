@@ -3241,6 +3241,93 @@ do
 	noErrors("icons: no error line in the log after all of that")
 end
 
+-- ---- a dungeon: no position can be read at all, and the buffs are hidden in a fight
+do
+	local db = ShamanKitDB
+	local function clear()
+		totems = {}; secretMode = false; secretPos = false; inCombat = false; AURAS_HIDDEN = false
+		for s = 1, 4 do fire("PLAYER_TOTEM_UPDATE", s) end
+		runTimers(); tick()
+	end
+	clear()
+	local keep = { db.showRange, db.showOut, db.tint, db.distanceMode, db.rangeByBuff }
+	db.showRange, db.showOut, db.tint, db.distanceMode, db.rangeByBuff = false, false, true, "bar", true   -- the marks off, as some people play
+	local realPos, realMapOn = pos, mapOn
+	pos = nil; mapOn = false                          -- an instance: neither the yard position nor the map position
+	BUFF_READS = true
+	t = t + 10
+	local function red(b) return b.icon.color and b.icon.color[1] == 0.8 and b.icon.color[2] == 0.1 end
+	local function plain(b) return not b.icon.color or (b.icon.color[1] == 1 and b.icon.color[2] == 1 and b.icon.color[3] == 1) end
+	local function waiting(b) return b.mark.shown ~= false and b.mark.tex and b.mark.tex:find("Waiting") ~= nil end
+
+	-- out of a fight the buff answers: in range, then out of range
+	auras["Strength of Earth"] = {}
+	totems[2] = { name = "Strength of Earth Totem", start = t, dur = 300, icon = 8 }
+	fire("PLAYER_TOTEM_UPDATE", 2); t = t + 4; tick()
+	check(plain(btn(2)) and btn(2).mark.shown == false, "dungeon: with the buff on, no tint and no mark (marks are off)")
+	auras["Strength of Earth"] = nil; t = t + 1; tick()
+	check(red(btn(2)) and btn(2).mark.shown == false, "dungeon: the buff is gone: the icon is red")
+	-- a fight begins: the buff can't be read and there is no position: the last answer stands, with a "?"
+	AURAS_HIDDEN = true; inCombat = true; t = t + 1; tick()
+	check(red(btn(2)), "dungeon fight: a totem that was red stays red (it must not light up as if you were next to it)")
+	check(waiting(btn(2)), "dungeon fight: ...and says '?', even with the check and cross switched off")
+	-- one that was in range stays plain, but is marked as unsure
+	AURAS_HIDDEN = false; inCombat = false
+	auras["Mana Spring"] = {}
+	totems[3] = { name = "Mana Spring Totem", start = t, dur = 300, icon = 9 }
+	fire("PLAYER_TOTEM_UPDATE", 3); t = t + 4; tick()
+	check(plain(btn(3)) and btn(3).mark.shown == false, "dungeon: another totem with its buff: plain")
+	AURAS_HIDDEN = true; inCombat = true; t = t + 1; tick()
+	check(plain(btn(3)) and waiting(btn(3)), "dungeon fight: one that was in range stays plain, with the '?'")
+	-- a totem dropped in the fight: nothing is known about it
+	totems[4] = { name = "Windfury Totem", start = t, dur = 300, icon = 10 }
+	fire("PLAYER_TOTEM_UPDATE", 4); tick()
+	check(plain(btn(4)) and waiting(btn(4)), "dungeon fight: a new totem is unknown: plain, with the '?'")
+	-- the status line and the tooltip say what is going on
+	local out = {}
+	local pr = print; print = function(...) out[#out + 1] = table.concat({ ... }, " ") end
+	SlashCmdList.SHAMANKIT("status")
+	print = pr
+	local joined = table.concat(out, "\n")
+	check(joined:find("unknown via unknown %(last known: out of range%)") and joined:find("unknown via unknown %(last known: in range%)"), "dungeon fight: status says what the last answer was")
+	local lines = {}
+	rawset(GameTooltip, "AddLine", function(_, text) lines[#lines + 1] = text end)
+	local hit2 = _G.ShamanKitHit2
+	hit2.scripts.OnEnter(hit2)
+	rawset(GameTooltip, "AddLine", nil)
+	local told = false
+	for _, l in ipairs(lines) do if tostring(l):find("Last time it could be read you were out of range") then told = true end end
+	check(told, "dungeon fight: the tooltip says what the last answer was")
+	-- the old totem's last answer is not inherited by a new totem in the same place
+	totems[2] = { name = "Strength of Earth Totem", start = t + 1, dur = 300, icon = 8 }
+	fire("PLAYER_TOTEM_UPDATE", 2); tick()
+	check(plain(btn(2)) and waiting(btn(2)), "dungeon fight: a new totem in a place that held a red one starts unknown, not red")
+	-- the fight ends: the buff speaks again
+	AURAS_HIDDEN = false; inCombat = false; auras["Strength of Earth"] = {}; auras["Mana Spring"] = nil; t = t + 4
+	fire("PLAYER_REGEN_ENABLED"); tick()
+	check(plain(btn(2)) and btn(2).mark.shown == false, "dungeon: after the fight a buff that is on gives in range again")
+	check(red(btn(3)) and btn(3).mark.shown == false, "dungeon: ...and one that is not gives out of range")
+	-- a mark switched on still works as before
+	db.showOut = true; tick()
+	check(btn(3).mark.shown ~= false and btn(3).mark.tex:find("NotReady"), "dungeon: with the cross on, out of range shows the cross")
+	db.showOut = false
+
+	-- near the edge with a position that CAN be read: that is a "?" about the edge, not a hold of the last answer
+	clear(); BUFF_READS = false; pos = { y = 0, x = 0, map = 1 }; mapOn = true; t = t + 10
+	totems[1] = { name = "Searing Totem III", start = t, dur = 60, icon = 7 }
+	fire("PLAYER_TOTEM_UPDATE", 1)
+	pos = { y = 0, x = 40, map = 1 }; tick()
+	check(red(btn(1)), "edge: 40 yd from a 20 yd totem: red")
+	pos = { y = 0, x = 20, map = 1 }; tick()
+	check(plain(btn(1)) and waiting(btn(1)), "edge: at the edge: plain with the '?', the old red is not held (the position is readable)")
+
+	clear()
+	BUFF_READS = false
+	pos = realPos; mapOn = realMapOn
+	db.showRange, db.showOut, db.tint, db.distanceMode, db.rangeByBuff = keep[1], keep[2], keep[3], keep[4], keep[5]
+	noErrors("dungeon: nothing raised an error in the log")
+end
+
 -- ---- naming totems in a fight: one cast per element (Call of the Elements drops four at once)
 do
 	local function clear()
@@ -3710,8 +3797,12 @@ do
 	check(#printedErrors == 0, "log file: nothing was printed as an error")
 	-- the game only writes the files it is told about: both names are in the .toc
 	local toc = assert(io.open("ShamanKit/ShamanKit.toc")):read("*a")
-	local vars = toc:match("## SavedVariables:%s*([^\n]+)") or ""
-	check(vars:find("ShamanKitDB", 1, true) and vars:find("ShamanKitLogDB", 1, true), "log file: the .toc lists both saved variables (" .. vars .. ")")
+	-- (the game writes ALL of an addon's account-wide variables into one file, so the log must be a per-character
+	-- variable to be a file of its own)
+	local acct = toc:match("## SavedVariables:%s*([^\n]+)") or ""
+	local perChar = toc:match("## SavedVariablesPerCharacter:%s*([^\n]+)") or ""
+	check(acct:find("ShamanKitDB", 1, true) and not acct:find("ShamanKitLogDB", 1, true), "log file: the settings are the only account-wide saved variable (" .. acct .. ")")
+	check(perChar:find("ShamanKitLogDB", 1, true) and not perChar:find("ShamanKitDB%f[%W]%s*$"), "log file: the log is a per-character saved variable (" .. perChar .. ")")
 	loadFresh(keep, ShamanKitLogDB)
 end
 
