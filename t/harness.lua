@@ -1385,15 +1385,23 @@ do
 	inCombat = false; both("PLAYER_REGEN_ENABLED"); settle()
 
 	-- ------------------------------------------------ unlocked: drag the row
-	db.locked = false; ns.cureApply()
-	check(S.cells.poison.shown and S.cells.poison.mouse == true, "cures: unlocked: the cells are there to grab")
+	db.locked = false; ns.optionsOpen = false; ns.cureApply()
+	check(not S.cells.poison.shown and not S.cells.disease.shown and not S.cells.curse.shown and S.cells.poison.mouse == false, "cures: unlocked, settings closed: the row is NOT on screen")
+	ns.optionsOpen = true; ns.cureApply()
+	check(S.cells.poison.shown and S.cells.disease.shown and S.cells.curse.shown and S.cells.poison.mouse == true, "cures: unlocked, a ShamanKit settings page open: the cells are there to grab")
+	ns.optionsOpen = false; ns.cureApply()
+	check(not S.cells.poison.shown, "cures: settings closed again: the row goes away")
+	db.locked = true; ns.optionsOpen = true; ns.cureApply()
+	check(not S.cells.poison.shown and not S.cells.disease.shown, "cures: locked with a settings page open: the row is not on screen either (only moving it shows it)")
+	db.locked = false
+	ns.optionsOpen = true; ns.cureApply()
 	local moved = 0
 	local row = S.row
 	rawset(row, "StartMoving", function() moved = moved + 1 end)
 	S.cells.poison.scripts.OnDragStart(S.cells.poison)
 	S.cells.poison.scripts.OnDragStop(S.cells.poison)
 	check(moved == 1 and db.curePoint == "CENTER" and db.cureX == 10 and db.cureY == 20, "cures: dragging the row saves where it was dropped")
-	db.locked = true; ns.cureApply(); moved = 0
+	db.locked = true; ns.optionsOpen = false; ns.cureApply(); moved = 0
 	S.cells.poison.scripts.OnDragStart(S.cells.poison)
 	check(moved == 0, "cures: locked: a drag moves nothing")
 	inCombat = true; db.locked = false
@@ -1450,6 +1458,7 @@ do
 		check(cd.attrs.spell1 == "Cure Disease" and cc.attrs.spell1 == "Shatter Curse", "cures click: each icon casts its own cure")
 		check(cp.mouse == true and cp.shown == true, "cures click: the button takes the mouse, and the addon never hides it (the game's icon does)")
 		check(S.assigned[btn(3)].click == nil, "cures click: the overlays on your action buttons stay plain (the real button there already casts)")
+		db.log = {}; db.cureClick = false; ns.cureApply(); db.cureClick = true; ns.cureApply()
 		check(lines("CURES click: poison cast Cure Poison on you") == 1, "cures click: the log says what each icon casts")
 		-- the tooltip
 		cp.scripts.OnEnter(cp)
@@ -1461,9 +1470,11 @@ do
 		db.cureClick = true; ns.cureApply()
 		check(cp.attrs.spell1 == "Cure Poison" and cp.mouse == true, "cures click: switched on again")
 		-- unlocked: the row is for dragging
-		db.locked = false; ns.cureApply()
-		check(cp.attrs.type1 == nil and cp.mouse == false, "cures click: unlocked: clicking is off (the row is being moved)")
-		db.locked = true; ns.cureApply()
+		db.locked = false; ns.optionsOpen = false; ns.cureApply()
+		check(cp.attrs.spell1 == "Cure Poison" and cp.mouse == true, "cures click: unlocked with settings closed: the row is not being moved, so clicking works")
+		ns.optionsOpen = true; ns.cureApply()
+		check(cp.attrs.type1 == nil and cp.mouse == false, "cures click: unlocked with settings open: the row is being moved, clicking is off")
+		ns.optionsOpen = false; db.locked = true; ns.cureApply()
 		check(cp.attrs.spell1 == "Cure Poison", "cures click: locked again")
 		-- a cure you do not have
 		CURE_KNOWN[526] = nil; S.knownDirty = true; ns.cureApply()

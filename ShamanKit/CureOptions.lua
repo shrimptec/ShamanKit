@@ -23,10 +23,10 @@ function ns.buildCuresPage(ui)
 	local row = page.add(checkbox(p, "In a small icon row", "cureRow", LEFT, -248))
 	local always = page.add(checkbox(p, "Keep the row on screen when nothing is on me", "cureAlways", LEFT, -274))
 	local click = page.add(checkbox(p, "Click a lit icon to cure myself", "cureClick", LEFT, -300))
-	local clickNote = note(p, "Casts that cure on you, in a fight too. Needs the frames locked.", LEFT + 28, -328)
+	local clickNote = note(p, "Casts that cure on you, in a fight too.", LEFT + 28, -328)
 
 	header(p, "Position of the row", LEFT, -372, COLW)
-	local unlock = page.add(checkbox(p, "Unlock the frames (drag the row to move it)", "locked", LEFT, -398,
+	local unlock = page.add(checkbox(p, "Unlock the frames (the row shows here so you can drag it)", "locked", LEFT, -398,
 		function() return ns.get().locked == false end,
 		function(v) ns.get().locked = not v end))
 	note(p, "The same lock as the totem bar's.", LEFT + 28, -426)
@@ -73,9 +73,9 @@ function ns.buildCuresPage(ui)
 		local rowOn = d.cureRow and true or false
 		enable(always, rowOn); enable(size, rowOn); enable(spacing, rowOn); enable(count, rowOn)
 		enable(unlock, rowOn)
-		enable(click, rowOn and d.locked ~= false)
-		clickNote:SetText(d.locked == false and "The frames are unlocked, so clicking is off until you lock them."
-			or "Casts that cure on you, in a fight too. Needs the frames locked.")
+		enable(click, rowOn and d.locked ~= false)  -- (while this window is up, unlocked means moving)
+		clickNote:SetText(d.locked == false and "The frames are unlocked, so clicking is off while this window is open."
+			or "Casts that cure on you, in a fight too.")
 		enable(washAlpha, d.cureWash and true or false)
 		local state = ns.cureState
 		if state and state.conflict then

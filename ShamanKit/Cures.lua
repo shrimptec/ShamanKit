@@ -79,6 +79,12 @@ ns.cureState = S                                   -- (read by the tests)
 
 local function short(m) m = tostring(m):gsub("%s+", " "); return m:sub(1, 80) end
 
+-- Moving the row: the frames are unlocked AND a ShamanKit settings page is open. An unlocked bar alone does not put the row
+-- on screen (it would sit there all the time), and while it is being moved nothing is clickable.
+local function movingRow()
+	return db.locked == false and ns.optionsOpen == true
+end
+
 -- the frames and the container may only be touched out of combat, and never while the game hides auras
 local function canTouch()
 	return not InCombatLockdown() and not (ns.aurasHidden and ns.aurasHidden())
@@ -330,7 +336,7 @@ end
 local function armClick(rec)
 	local b = rec.click
 	if not b then return end
-	local want = db.cureClick and db.locked ~= false and db.cureOn and not S.conflict and S.known[rec.cure.key] == true
+	local want = db.cureClick and not movingRow() and db.cureOn and not S.conflict and S.known[rec.cure.key] == true
 	local name = want and (rec.cure.localName or rec.cure.name) or false
 	if rec.armed == name then return end
 	rec.armed = name
@@ -644,7 +650,7 @@ local function apply()
 			local have = S.known[cure.key] == true
 			if have or samp or testing then
 				keys[#keys + 1] = cure.key
-				shown[cure.key] = (have and (db.cureAlways or db.locked == false)) or litPlain(cure.key)
+				shown[cure.key] = (have and (db.cureAlways or movingRow())) or litPlain(cure.key)
 			end
 		end
 	end
