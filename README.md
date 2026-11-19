@@ -41,6 +41,20 @@ Install it with the `wowupd` addon manager, which then keeps it updated: `wowupd
 later updates need only `/reload`. Without wowupd: download `ShamanKit-v<version>-forever.zip` from the latest
 release and unzip it into `World of Warcraft/_forever_/Interface/AddOns/`.
 
+## Your settings, and syncing them between computers
+
+A WoW addon can't write its own config file; the game saves an addon's settings itself, into
+`WTF/Account/<your account>/SavedVariables/`, when you `/reload` or log out. ShamanKit keeps two files there:
+
+- `ShamanKit.lua` is **only your settings** (layout, sizes, positions, options). This is the one to sync.
+- `ShamanKitLogDB.lua` is the debug log. It changes every session and is only useful for bug reports: leave it out.
+
+To use the same settings on two computers, sync `ShamanKit.lua` (for example with Syncthing; if you sync the whole
+`SavedVariables` folder, ignore `ShamanKitLogDB.lua*` and `*.bak`). The game reads the file when you log in and writes it
+when you log out or `/reload`, so: close or log out of the game on one computer before you play on the other, and give
+Syncthing a moment to finish. If both games run at once, whichever logs out last wins. Positions are saved relative to
+the screen, so a different monitor or UI scale may need a touch-up with **Move on screen**.
+
 ## Coming from TotemRange
 
 ShamanKit is the new name of TotemRange. It is a separate addon folder with its own saved settings, so remove the old

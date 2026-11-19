@@ -268,7 +268,7 @@ local fails = 0
 local function check(cond, msg) if not cond then fails = fails + 1; print("FAIL: " .. msg) else print("ok:   " .. msg) end end
 local function noErrors(msg)
 	local bad
-	for _, l in ipairs(ShamanKitDB.log or {}) do if l:find("ERROR") then bad = l end end
+	for _, l in ipairs(ShamanKitLogDB.lines or {}) do if l:find("ERROR") then bad = l end end
 	check(bad == nil, msg .. (bad and (" -> " .. bad) or ""))
 end
 
@@ -568,7 +568,7 @@ do
 	rescan()
 	check(btn(3).shown and bar().anyShown, "missed event: the rescan shows the totem anyway")
 	local logged = false
-	for _, line in ipairs(ShamanKitDB.log or {}) do if line:find("RESCAN found slot 3") then logged = true end end
+	for _, line in ipairs(ShamanKitLogDB.lines or {}) do if line:find("RESCAN found slot 3") then logged = true end end
 	check(logged, "...and logs that it caught a missed event")
 	-- it must not invent a position: with none recorded the mark is the unknown one, never a green "in range"
 	check(not btn(3).mark.tex:find("ReadyCheck%-Ready"), "...with unknown range, not a guessed green tick")
@@ -789,7 +789,7 @@ end
 
 -- ---- if the game ever does block something, it is written to the log with where it came from
 do
-	local function lastLog() local l = ShamanKitDB.log; return l[#l] end
+	local function lastLog() local l = ShamanKitLogDB.lines; return l[#l] end
 	fire("ADDON_ACTION_BLOCKED", "SomeOtherAddon", "Frame:Hide()")
 	check(not (lastLog() or ""):find("ACTION_BLOCKED"), "a block caused by another addon is not logged as ours")
 	local before = #printedErrors
@@ -1029,7 +1029,7 @@ do
 	local function out() totems = {}; for slot = 1, 4 do fire("PLAYER_TOTEM_UPDATE", slot) end end
 	local function errorsInLog(what)
 		local n = 0
-		for _, l in ipairs(ShamanKitDB.log or {}) do if l:find("ERROR in " .. what, 1, true) then n = n + 1 end end
+		for _, l in ipairs(ShamanKitLogDB.lines or {}) do if l:find("ERROR in " .. what, 1, true) then n = n + 1 end end
 		return n
 	end
 	ShamanKitDB.hold = nil; ShamanKitDB.reserve = { [1] = true, [4] = true }; ShamanKitDB.distanceMode = "bar"
@@ -1200,7 +1200,7 @@ do
 	end
 	local function at(x) pos = { y = 0, x = x, map = 1 }; t = t + 1; tick() end
 	local function clear() for k in pairs(totems) do totems[k] = nil end; fire("PLAYER_ENTERING_WORLD"); auras["Strength of Earth"] = nil; BUFF_READS = false; AURAS_HIDDEN = false; inCombat = false; pos = { y = 0, x = 0, map = 1 } end
-	clear(); ShamanKitDB.distanceMode = "yards"; ShamanKitDB.log = {}
+	clear(); ShamanKitDB.distanceMode = "yards"; ShamanKitLogDB.lines = {}
 	local calls = 0
 	local real = C_UnitAuras.GetAuraDataBySpellName
 	C_UnitAuras.GetAuraDataBySpellName = function(...) calls = calls + 1; return real(...) end
@@ -1228,14 +1228,14 @@ do
 	check(mark(2) == "out", "range: no buff, 5 yd: out (a totem a few yards off does not read as 'in' by position)")
 	check(btn(2).dist.text == "30.9 yd", "range: ...and the number does not say 5 (" .. tostring(btn(2).dist.text) .. ")")
 	local n = 0
-	for _, l in ipairs(ShamanKitDB.log) do
+	for _, l in ipairs(ShamanKitLogDB.lines) do
 		if (l:find("%-> true via buff") and l:find("positionSays=false")) or (l:find("%-> false via buff") and l:find("positionSays=true")) then n = n + 1 end
 	end
 	check(n == 3, "range: the log notes each time the buff and the position disagree, once (" .. n .. ")")
-	local before = #ShamanKitDB.log
+	local before = #ShamanKitLogDB.lines
 	for _ = 1, 12 do t = t + 0.3; tick() end
-	check(#ShamanKitDB.log == before, "range: the same answer again and again adds nothing to the log")
-	check(ShamanKitDB.log[#ShamanKitDB.log]:find("placed u=") ~= nil, "range: ...with both positions, so the real offset can be worked out")
+	check(#ShamanKitLogDB.lines == before, "range: the same answer again and again adds nothing to the log")
+	check(ShamanKitLogDB.lines[#ShamanKitLogDB.lines]:find("placed u=") ~= nil, "range: ...with both positions, so the real offset can be worked out")
 
 	-- it is only read every half second per totem
 	auras["Strength of Earth"] = {}
@@ -1342,7 +1342,7 @@ do
 	check(ShamanKitDB.rangeByBuff == true, "range setting: Defaults on this page turns it back on")
 
 	C_UnitAuras.GetAuraDataBySpellName = real
-	clear(); ShamanKitDB.distanceMode = "bar"; ShamanKitDB.log = {}
+	clear(); ShamanKitDB.distanceMode = "bar"; ShamanKitLogDB.lines = {}
 end
 
 -- ---- Calls: buttons for Call of the ..., Totemic Call and Totemic Recall beside the bar (Calls.lua)
@@ -1362,7 +1362,7 @@ do
 	assert(cf, "the Calls frame registered its events")
 	local function cfire(e, ...) cf.scripts.OnEvent(cf, e, ...) end
 	local function bt(i) return _G["ShamanKitCall" .. i] end
-	local function lines2(pat) local n = 0; for _, l in ipairs(db.log or {}) do if l:find(pat) then n = n + 1 end end return n end
+	local function lines2(pat) local n = 0; for _, l in ipairs(ShamanKitLogDB.lines or {}) do if l:find(pat) then n = n + 1 end end return n end
 	local function reset()
 		inCombat = false; AURAS_HIDDEN = false
 		db.callOn, db.callTotemic, db.callRecall, db.callSide, db.callChoice = false, false, false, "start", 0
@@ -1965,7 +1965,7 @@ do
 	local function types(name) local c = cont(); local f = (c.filters and c.filters[name]) or c.slots[name].opts.candidateFilters; return f.includeDispelTypes end
 	local function empty(tb) return next(tb) == nil end
 	local function parked(b) return b.anchor ~= nil and b.anchor[2] == UIParent and b.anchor[4] == -9000 end
-	local function lines(pat) local n = 0; for _, l in ipairs(db.log or {}) do if l:find(pat) then n = n + 1 end end return n end
+	local function lines(pat) local n = 0; for _, l in ipairs(ShamanKitLogDB.lines or {}) do if l:find(pat) then n = n + 1 end end return n end
 	local function settle() runTimers() end
 	-- the Cures module listens on a frame of its own: find it by the events it registered
 	local cf
@@ -1981,7 +1981,7 @@ do
 		db.cureSize, db.cureSpacing, db.cureWash, db.cureWashAlpha, db.curePulse, db.cureCount = 36, 4, true, 30, true, true
 	end
 
-	reset(); db.log = {}
+	reset(); ShamanKitLogDB.lines = {}
 	for i = 1, #buttons do ACTIONS[i] = { "spell", 8075 } end            -- every button holds some other spell
 	check(db.cureOn == true and db.cureBars == true and db.cureRow == true and db.cureAlways == false and db.cureSize == 36, "cures: defaults are on, row hidden until something is on you")
 	check(ns.defaults.cureCount == true and ns.defaults.curePulse == true and ns.defaults.cureWash == true, "cures: the look defaults")
@@ -2118,7 +2118,7 @@ do
 	db.cureSpacing = 4; ns.cureApply()
 
 	-- ------------------------------------------------ the backup reading (out of combat only)
-	db.log = {}
+	ShamanKitLogDB.lines = {}
 	DEBUFFS = { { dispelName = "Poison" }, { dispelName = "Magic" }, { dispelName = "Poison" } }
 	cfire("UNIT_AURA", "player"); settle()
 	check(S.reader.lit.poison == true and S.reader.count.poison == 2 and S.reader.lit.disease == false, "cures: reading: two poisons, no disease")
@@ -2240,7 +2240,7 @@ do
 		check(cd.attrs.spell1 == "Cure Disease" and cc.attrs.spell1 == "Shatter Curse", "cures click: each icon casts its own cure")
 		check(cp.mouse == true and cp.shown == true, "cures click: the button takes the mouse, and the addon never hides it (the game's icon does)")
 		check(S.assigned[btn(3)].click == nil, "cures click: the overlays on your action buttons stay plain (the real button there already casts)")
-		db.log = {}; db.cureClick = false; ns.cureApply(); db.cureClick = true; ns.cureApply()
+		ShamanKitLogDB.lines = {}; db.cureClick = false; ns.cureApply(); db.cureClick = true; ns.cureApply()
 		check(lines("CURES click: poison cast Cure Poison on you") == 1, "cures click: the log says what each icon casts")
 		-- the tooltip
 		cp.scripts.OnEnter(cp)
@@ -2307,7 +2307,7 @@ do
 
 		-- the game refuses to make a secure child: the icon still works, the log says why, nothing raises
 		local realCF = CreateFrame
-		db.log = {}
+		ShamanKitLogDB.lines = {}
 		S.container, S.failed, S.rowSlots, S.pools, S.assigned = nil, false, {}, {}, {}
 		function CreateFrame(kind, name, parent, tmpl)
 			if tmpl == "SecureActionButtonTemplate" then error("secure frames can't be made here") end
@@ -2321,13 +2321,13 @@ do
 		S.container, S.rowSlots, S.pools, S.assigned = nil, {}, {}, {}
 		S.knownDirty = true; ns.cureApply()
 		check(S.rowSlots.poison.click ~= nil and S.rowSlots.poison.click.attrs.spell1 == "Cure Poison", "cures click: next time it is made fine")
-		db.log = {}
+		ShamanKitLogDB.lines = {}
 	end
 
 	-- ------------------------------------------------ no container on this client: plain frames lit by the reading
 	for _, rec in pairs(S.rowSlots) do rec.on = false end
 	S.container, S.failed, S.rowSlots, S.pools, S.assigned = nil, false, {}, {}, {}
-	CONTAINER_FAILS = true; db.log = {}
+	CONTAINER_FAILS = true; ShamanKitLogDB.lines = {}
 	DEBUFFS = { { dispelName = "Disease" } }
 	ns.cureApply(); cfire("UNIT_AURA", "player"); settle()
 	check(S.failed == true and lines("CURES container could not be made") == 1, "cures fallback: the log says the container could not be made")
@@ -2456,7 +2456,7 @@ do
 	local function S() return _G.ShamanKitShield end
 	local aux = _G.ShamanKitIndicators
 	local function second() ev.scripts.OnUpdate(ev, 1.0) end      -- the once-a-second look
-	ShamanKitDB.log = {}                                         -- earlier sections log deliberate errors; start clean
+	ShamanKitLogDB.lines = {}                                         -- earlier sections log deliberate errors; start clean
 
 	totems = {}; inCombat = false; secretMode = false; secretPos = false; mapOn = true
 	auras = {}
@@ -2670,7 +2670,7 @@ do
 	-- buff ids, and the count text (a string the addon can't read).
 	do
 		secretPos = false; AURAS_HIDDEN = false; IDAURAS = {}; EXTRA_IDS = {}; COUNT_SECRET = false; IDLIST_FAILS = false
-		db.shieldOn = true; inCombat = false; ShamanKitDB.log = {}
+		db.shieldOn = true; inCombat = false; ShamanKitLogDB.lines = {}
 		local live = { applications = 3, auraInstanceID = 353, spellId = 945 }
 		auras["Lightning Shield"] = live; IDAURAS[353] = live; fire("UNIT_AURA", "player")
 		check(S().shown and S().count.text == "3", "fight test: shield up out of combat, 3 charges")
@@ -2685,9 +2685,9 @@ do
 		check(S().count.color[1] == 1, "...white, no warning colour")
 		check(not tostring(S().tipLine):find("can't be read"), "no 'can't be read' text anywhere")
 		local seen
-		for _, l in ipairs(ShamanKitDB.log) do if l:find("SHIELD in a fight") then seen = l end end
+		for _, l in ipairs(ShamanKitLogDB.lines) do if l:find("SHIELD in a fight") then seen = l end end
 		check(seen ~= nil and seen:find("id=353") and seen:find("up") and seen:find("found") and seen:find("count"), "the log says what each call answered")
-		local function lines() local n = 0; for _, l in ipairs(ShamanKitDB.log) do if l:find("SHIELD in a fight") then n = n + 1 end end return n end
+		local function lines() local n = 0; for _, l in ipairs(ShamanKitLogDB.lines) do if l:find("SHIELD in a fight") then n = n + 1 end end return n end
 		local before = lines(); for _ = 1, 6 do second(); fire("UNIT_AURA", "player") end
 		check(lines() == before, "...a line only when the answer changes, not once per message")
 		IDAURAS[353] = nil
@@ -2711,7 +2711,7 @@ do
 		IDLIST_FAILS = true; live2.applications = 2; second()
 		check(S().shown and S().count.text == "2" and S().count.color[1] == 1, "id list blocked: the count text alone still shows the live number (2), white")
 		live2.applications = 1; second(); check(S().count.text == "1", "...and follows it (1)")
-		local sawErr; for _, l in ipairs(ShamanKitDB.log) do if l:find("ids: error") then sawErr = true end end
+		local sawErr; for _, l in ipairs(ShamanKitLogDB.lines) do if l:find("ids: error") then sawErr = true end end
 		check(sawErr, "the log says why the list failed")
 		-- both blocked: icon and last number stay, a little grey (nothing else can be read)
 		COUNT_FAILS = true; second()
@@ -2766,7 +2766,7 @@ do
 	do
 		CONTAINER_FAILS = false; NO_SLOTS = false; BAD_FORMATTER = false; AURAS_HIDDEN = false; inCombat = false
 		secretPos = false; IDAURAS = {}; EXTRA_IDS = {}; auras["Lightning Shield"] = nil
-		db.shieldOn = true; db.weaponOn = false; ns.optionsOpen = false; ShamanKitDB.log = {}
+		db.shieldOn = true; db.weaponOn = false; ns.optionsOpen = false; ShamanKitLogDB.lines = {}
 		ns._resetBox(); ns.updatePreview(); second()
 		local c
 		for _, f in ipairs(frames) do if f.kind == "AuraContainer" and f.slots and f.slots.ShamanKitShield then c = f end end
@@ -2789,7 +2789,7 @@ do
 		auras["Lightning Shield"] = { applications = 3, auraInstanceID = 31, spellId = 945 }; fire("UNIT_AURA", "player"); second()
 		check(not S().shown, "container: the shield is really up and readable, still only the game's icon (no double)")
 		auras["Lightning Shield"] = nil; fire("UNIT_AURA", "player"); second()
-		local made; for _, l in ipairs(ShamanKitDB.log) do if l:find("SHIELD container made") then made = l end end
+		local made; for _, l in ipairs(ShamanKitLogDB.lines) do if l:find("SHIELD container made") then made = l end end
 		check(made and made:find("slot") and made:find("CreateNumericRuleFormatter"), "container: the log says what was made")
 		check(ns.boxInfo():find("game%-drawn"), "container: status says so")
 
@@ -2833,22 +2833,22 @@ do
 		BAD_FORMATTER = false
 
 		-- no formatter object on this client: still works, and the log says 1 charge shows blank
-		local su = C_StringUtil; C_StringUtil = nil; ShamanKitDB.log = {}; ns._resetBox(); ns.updatePreview(); second()
-		local noFmt; for _, l in ipairs(ShamanKitDB.log) do if l:find("none %(1 charge shows blank%)") then noFmt = true end end
+		local su = C_StringUtil; C_StringUtil = nil; ShamanKitLogDB.lines = {}; ns._resetBox(); ns.updatePreview(); second()
+		local noFmt; for _, l in ipairs(ShamanKitLogDB.lines) do if l:find("none %(1 charge shows blank%)") then noFmt = true end end
 		check(noFmt, "no number formatter on this client: still made, and the log says 1 charge shows blank")
 		C_StringUtil = su
 
 		-- the client can't make one: the older reading is used, nothing breaks
-		CONTAINER_FAILS = true; ShamanKitDB.log = {}; ns._resetBox(); ns.updatePreview(); second()
+		CONTAINER_FAILS = true; ShamanKitLogDB.lines = {}; ns._resetBox(); ns.updatePreview(); second()
 		check(ns.boxInfo():find("not available"), "container refused: status says it reads by name instead")
 		auras["Lightning Shield"] = { applications = 2, auraInstanceID = 9, spellId = 945 }; fire("UNIT_AURA", "player")
 		check(S().shown and S().count.text == "2", "container refused: the shield icon still works the old way out of combat")
 		auras["Lightning Shield"] = nil; fire("UNIT_AURA", "player")
-		local refused; for _, l in ipairs(ShamanKitDB.log) do if l:find("container could not be made") then refused = true end end
+		local refused; for _, l in ipairs(ShamanKitLogDB.lines) do if l:find("container could not be made") then refused = true end end
 		check(refused, "container refused: the log says why")
 		-- it is not retried every second
-		local before = #ShamanKitDB.log; for _ = 1, 5 do second() end
-		check(#ShamanKitDB.log == before, "container refused: not retried over and over")
+		local before = #ShamanKitLogDB.lines; for _ = 1, 5 do second() end
+		check(#ShamanKitLogDB.lines == before, "container refused: not retried over and over")
 		-- started in a fight: wait for the fight to end, then make it
 		CONTAINER_FAILS = false; ns._resetBox(); inCombat = true; AURAS_HIDDEN = true; ns.updateAux(); second()
 		check(ns.boxInfo():find("not made yet"), "the game started in a fight: no container is made in combat")
@@ -2945,7 +2945,7 @@ do
 	db.size = 36; db.vertical = false; db.auxAnchor = "bar"; ns.updatePreview()
 	-- the whole fight touched no protected frame
 	local blocked
-	for _, l in ipairs(ShamanKitDB.log or {}) do if l:find("ACTION_BLOCKED") or l:find("ERROR") then blocked = l end end
+	for _, l in ipairs(ShamanKitLogDB.lines or {}) do if l:find("ACTION_BLOCKED") or l:find("ERROR") then blocked = l end end
 	check(blocked == nil, "icons: no error and no blocked action in the log" .. (blocked and (" -> " .. blocked) or ""))
 	enchants = { { hasEnchant = true, timeLeft = 1800000 } }; auras["Lightning Shield"] = nil
 	second(); fire("UNIT_AURA", "player")
@@ -3345,7 +3345,7 @@ do
 	local db = ShamanKitDB
 	local M = ns.moveState
 	local CS = ns.cureState
-	local function lineCount(pat) local n = 0; for _, l in ipairs(db.log or {}) do if l:find(pat) then n = n + 1 end end return n end
+	local function lineCount(pat) local n = 0; for _, l in ipairs(ShamanKitLogDB.lines or {}) do if l:find(pat) then n = n + 1 end end return n end
 	rawset(UIParent, "GetCenter", function() return 960, 540 end)         -- the middle of a pretend screen
 	local function rectFor(name, l, b, w, h)
 		local f = _G[name]
@@ -3578,6 +3578,44 @@ do
 	noErrors("move: nothing raised an error in the log")
 	setup()
 	IsPlayerSpell = nil
+end
+
+-- the debug log lives in a file of its own, so the settings file is only settings (and can be synced between machines)
+do
+	local keep = ShamanKitDB
+	local function loadFresh(settings, logdb)
+		ShamanKitDB, ShamanKitLogDB = settings, logdb
+		fire("ADDON_LOADED", "ShamanKit")
+	end
+	local before = #(ShamanKitLogDB and ShamanKitLogDB.lines or {})
+	loadFresh({ size = 40 }, nil)
+	check(type(ShamanKitLogDB) == "table", "log file: a fresh install makes it")
+	ns.dbg("PROBE one")
+	check(ShamanKitLogDB.lines[#ShamanKitLogDB.lines]:find("PROBE one"), "log file: a log line goes into ShamanKitLogDB")
+	check(ShamanKitDB.log == nil, "log file: ...and never into the settings")
+	local clean = true
+	for k, v in pairs(ShamanKitDB) do if type(v) == "table" and k ~= "hold" and k ~= "order" and k ~= "reserve" then clean = false end end
+	check(clean, "log file: the settings hold no table of log lines")
+	-- an older version's settings still carry a log: it is dropped, and the old lines are not copied anywhere
+	loadFresh({ size = 41, log = { "1.0 old line" } }, { lines = { "2.0 kept line" } })
+	check(ShamanKitDB.log == nil and ShamanKitDB.size == 41, "log file: the log an older version kept in the settings is removed")
+	check(ShamanKitLogDB.lines[1] == "2.0 kept line", "log file: lines already in the log file stay")
+	-- 80 lines at most
+	for i = 1, 200 do ns.dbg("fill %d", i) end
+	check(#ShamanKitLogDB.lines == 80 and ShamanKitLogDB.lines[80]:find("fill 200"), "log file: the newest 80 lines are kept")
+	-- damaged files start over instead of raising errors
+	loadFresh({}, 7)
+	check(type(ShamanKitLogDB) == "table", "log file: a damaged log file (a number) starts over")
+	loadFresh({}, { lines = "x" })
+	ns.dbg("after damage")
+	check(type(ShamanKitLogDB.lines) == "table" and ShamanKitLogDB.lines[1]:find("after damage"), "log file: damaged lines start over too")
+	-- the addon's own errors land there
+	check(#printedErrors == 0, "log file: nothing was printed as an error")
+	-- the game only writes the files it is told about: both names are in the .toc
+	local toc = assert(io.open("ShamanKit/ShamanKit.toc")):read("*a")
+	local vars = toc:match("## SavedVariables:%s*([^\n]+)") or ""
+	check(vars:find("ShamanKitDB", 1, true) and vars:find("ShamanKitLogDB", 1, true), "log file: the .toc lists both saved variables (" .. vars .. ")")
+	loadFresh(keep, ShamanKitLogDB)
 end
 
 -- what ships: the author's own layout (a fresh install gets this; saved settings are never overwritten)

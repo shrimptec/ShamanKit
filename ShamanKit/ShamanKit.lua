@@ -254,11 +254,13 @@ local auxMode                -- what those icons hang on: "bar", "player" or "fr
 
 -- ---------------------------------------------------------------- positions & auras
 
--- A short log kept in the saved variables (written on /reload or logout) so range problems can be read back
+-- A short log kept in its own saved variable (written on /reload or logout) so range problems can be read back. It is
+-- a file of its own (ShamanKitLogDB) so the settings file (ShamanKitDB) stays quiet and can be synced between machines.
+local logDB
 local function dbg(fmt, ...)
-	if not db then return end
-	local log = db.log
-	if not log then log = {}; db.log = log end
+	if not logDB then return end
+	local log = logDB.lines
+	if type(log) ~= "table" then log = {}; logDB.lines = log end
 	log[#log + 1] = ("%.1f "):format(GetTime()) .. fmt:format(...)
 	if #log > 80 then table.remove(log, 1) end
 end
@@ -1841,6 +1843,9 @@ ev:SetScript("OnEvent", guard("event", function(self, event, arg1, ...)
 	if event == "ADDON_LOADED" and arg1 == ADDON then
 		ShamanKitDB = ShamanKitDB or {}
 		db = ShamanKitDB
+		if type(ShamanKitLogDB) ~= "table" then ShamanKitLogDB = {} end     -- a damaged file starts over
+		logDB = ShamanKitLogDB
+		db.log = nil                       -- older versions kept the log with the settings: it lives in ShamanKitLogDB now
 		ns.migrate(db)
 		for k, v in pairs(ns.defaults) do if db[k] == nil then db[k] = v end end
 		fixOrder()
