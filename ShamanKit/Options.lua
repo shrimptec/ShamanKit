@@ -276,7 +276,7 @@ function ns.buildOptions()
 	-- ------------------------------------------------------------ page 1: the totem bar
 	local main = newPage("Totem bar", "Totem bar",
 		"Your active totems, how long they have left, and whether you are in range of each.",
-		{ "size", "spacing", "vertical", "showTimer", "showRange", "showOut", "tint", "distanceMode", "rangeByBuff", "buffBadge", "buffFollow", "attach", "attachX", "attachY", "locked" })
+		{ "size", "spacing", "vertical", "showTimer", "showRange", "showOut", "tint", "distanceMode", "rangeByBuff", "attach", "attachX", "attachY", "locked" })
 	local p1 = main.panel
 
 	header(p1, "Totem icons", LEFT, -88, COLW)
@@ -315,19 +315,12 @@ function ns.buildOptions()
 	reset:SetScript("OnClick", function() ns.resetPosition(); main.refresh() end)
 	note(p1, "Move on screen (top right) drags everything at once.", RIGHT, -240)
 
-	header(p1, "Range in a fight", RIGHT, -268, COLW)
-	-- one tick box: the old corner picture is retired, both settings follow this one
-	main.add(checkbox(p1, "Show range in a fight", "buffFollow", RIGHT, -292,
-		function() local d = ns.get(); return d.buffFollow == true and d.buffBadge ~= false end,
-		function(on) local d = ns.get(); d.buffFollow = on; d.buffBadge = on end))
-	note(p1, "Bright = in range, red = out of range.\nThe game draws it, so it also works\nin dungeons, where range can't be read.", RIGHT + 28, -318)
-
 	-- advanced: exact nudges while under the player frame, and how the range is judged
 	local offX = main.adv(main.add(slider(p1, "Position left / right (under the player frame)", "attachX", -200, 300, RIGHT, -412)))
 	local offY = main.adv(main.add(slider(p1, "Position up / down (under the player frame)", "attachY", -100, 100, RIGHT, -467)))
 	main.adv(header(p1, "Range accuracy", LEFT, -506, COLW))
 	main.adv(main.add(checkbox(p1, "Watch the totem's buff", "rangeByBuff", LEFT, -530)))
-	main.adv(note(p1, "On: a buff totem is judged by its buff when the game\nlets addons see it; near the edge a yellow ?.", LEFT + 28, -556))
+	main.adv(note(p1, "On: a buff totem is judged by its buff (the game draws\nit in a fight). Off: your drop spot alone.", LEFT + 28, -556))
 
 	-- offsets only matter while attached; dragging only while detached (the small icons can be dragged on their own)
 	local function mainDependents()

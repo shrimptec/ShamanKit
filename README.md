@@ -4,23 +4,14 @@
 
 Small helpers for shamans, for World of Warcraft: Forever, in the default UI style.
 
-- **Totem bar**: each active totem with its time left and whether you are in range of it. A buff totem is judged by its buff when the game lets addons read it (out of a fight); otherwise by distance, and near the edge of the range it shows a yellow ? instead of guessing, because a totem lands a little to one side of you. This is the "Watch the totem's buff" option on the Totem bar page (on by default); off goes back to judging by your drop spot alone. Can replace the default
+- **Totem bar**: each active totem with its time left and whether you are in range of it. A buff totem is judged by its buff when the game lets addons read it (out of a fight); otherwise by distance (a totem lands a little to one side of you, so right at the edge it is a best guess; there is no "?"). This is the "Watch the totem's buff" option on the Totem bar page (on by default); off goes back to judging by your drop spot alone. Can replace the default
   totem timers under the player frame. Right-click a totem to dismiss it. With the bar locked, left-click a place to cast
   the totem it shows (the dim placeholder of a kept place, or a totem that is out), also in a fight; it can be switched off.
 - **Buffs**: two small optional icons. The weapon icon either pops up when your weapon has no enchant (or one that is
   about to run out), or, if you prefer, shows which enchant is on and its time left, like the shield icon (main hand,
   hidden when dead, with no weapon or a fishing pole). The other icon shows your Lightning Shield charges while it is up. They can hang on the totem bar or the player frame (any side, any alignment, nudge and size are settings)
   or sit in a place of their own that you drag.
-- **A narrower "?"**: your position is only an estimate of the distance to a totem, so close to its edge in a fight the
-  icon shows a yellow ?. Each time you walk away from a totem out of a fight, ShamanKit notes where its buff really
-  stopped and uses that for the same totem in the next fight, so the ? shrinks to about a yard. Totems with no buff
-  (Searing, Magma) can't learn this and keep the wider ?.
-- **Show range in a fight** (one tick box on the Totem bar page, off by default): in a fight the totem icon stands red and
-  the game draws a bright copy over it only while you have the buff, so bright means in range and red means out, with no
-  guessing and no ?. The game draws it, so it works in a
-  fight and in dungeons, where no addon can measure range or read buffs. The buff's spell ids are learned the first time
-  a totem's buff can be read, so drop each totem once out of a fight. A buff from someone else's identical totem shows
-  too. Totems with no buff (Searing, Magma, Earthbind, Stoneclaw) keep the position estimate.
+- **Red without the buff, bright with it**: for a buff totem the icon is red while you do not have its buff and normal while you do, also in a fight and in dungeons, where no addon can measure range or read buffs: the game itself draws the buff over the red icon. Always on, nothing to set. A totem you have just dropped is not red while its buff is on its way (about 3 seconds), unless your position clearly says you ran off. The buff's spell ids are learned the first time a totem's buff can be read, so drop each totem once out of a fight (a totem dropped in a fight is judged by position until the fight ends). Each time you walk away from a totem out of a fight, ShamanKit also notes where its buff really stopped, which makes the position guess better. Totems with no buff (Searing, Magma, Earthbind, Stoneclaw) can only be judged by position, and show no mark when no position can be read (inside an instance).
 - **Simple and advanced settings**: each settings page shows the choices most people want. The fiddly ones (exact
   nudges, screen positions, spacing, per-button placement, range-accuracy) sit behind a **Show advanced** button at the
   top right of the page; it is one switch for every page, and nothing changes in how the addon works.

@@ -26,7 +26,7 @@ ns.defaults = {
 	showOut = false,         -- red cross when out of range
 	rememberLast = true,    -- a placeholder shows the last totem that was out in that place (a chosen totem always wins)
 	leftCast = true,        -- left-click a place on the bar to cast the totem it shows (locked bar only)
-	rangeByBuff = true,     -- judge a buff totem by its buff when it can be read, and say "?" near the edge (off: your drop spot alone)
+	rangeByBuff = true,     -- judge a buff totem by its buff when it can be read, and guess by position near the edge (off: your drop spot alone)
 	distanceMode = "bar",   -- how far you are from each totem: "bar" (room left in its radius), "yards" (exact number) or "off"
 	tint = true,
 	locked = true,
@@ -50,7 +50,7 @@ function ns.migrate(d)
 	if d.showRange == false and d.showOut == nil then d.showOut = false end   -- the old single switch hid both marks
 	if d.auxAnchor == nil then d.auxAnchor = (d.auxAttached == false) and "free" or "bar" end   -- "attached or not" became bar / player frame / own place
 	d.auxAttached = nil
-	if d.buffFollow ~= true then d.buffBadge = false end   -- 0.22: the corner picture is retired; one tick box (buffFollow) now
+	d.buffFollow, d.buffBadge = true, true   -- 0.22: the red/bright icon in a fight is always on (no setting, no corner picture)
 end
 
 local isSecret = issecretvalue or function() return false end
@@ -419,7 +419,7 @@ end
 -- spot is only an estimate of the distance to the totem. Two things follow:
 --   * a buff totem is judged by its BUFF whenever the game lets an addon read it (out of a fight): that is exact;
 --   * from the position alone, only a clear answer is given. Within EDGE_BAND yards of the radius (a third of the
---     radius at most, so a small totem keeps most of its circle) the answer is "can't tell" (the yellow ?).
+--     radius at most, so a small totem keeps most of its circle) the answer is a best guess (the radius, or the totem's learned edge): no "?" is drawn any more.
 local EDGE_BAND = 4
 local BUFF_EVERY = 0.5      -- seconds between buff reads for one totem (the buff changes on the totem's pulse)
 local BUFF_GRACE = 3        -- a totem's buff takes a moment to arrive: no buff in the first seconds proves nothing
@@ -485,7 +485,7 @@ local function rangeOf(slot, now)
 	if not s then return nil end
 	now = now or playerPos()
 	local was = s.at
-	local r, how, dist, byPos
+	local r, how, dist, byPos, guessed
 	local smart = db.rangeByBuff ~= false            -- the setting; also what a damaged value means
 	local function judge(d)                          -- smart: only a clear answer; off: the plain radius
 		if smart then return fromDistance(d, s.range, s.lo, s.hi) end
@@ -519,16 +519,29 @@ local function rangeOf(slot, now)
 		end
 	elseif how then
 		r = byPos
-		if r == nil then how = how .. ", near the edge" end
+		if r == nil then
+			-- near the edge, no buff to ask: no "?", the best guess (this totem's learned edge if it has one, else its radius)
+			local edge = (s.lo and s.hi and s.lo < s.hi) and (s.lo + s.hi) / 2 or s.range
+			r, guessed = dist <= edge, true
+			how = how .. ", near the edge (best guess)"
+		end
 	else
 		how = "unknown"
 	end
 	-- the game itself is drawing this totem's buff over its icon (Badges.lua), so in a fight, where nothing can be read,
 	-- the icon stands red and the game's own picture covers it while the buff is on you: exact, no guess
 	local follows = smart and buff == nil and ns.badgeFollows and ns.badgeFollows(slot, s.aura) or false
-	if follows then r, how, dist = nil, "game-drawn buff", nil end
-	if r ~= nil then s.sure = r end                 -- the last clear answer
-	local held                                      -- no source at all (no position, buff hidden): the last clear answer stands, as a "?"
+	if follows then
+		-- a totem you only just dropped is next to you and its buff arrives on the next pulse: it does not start red.
+		-- Only a position that clearly says "out" (you ran off at once) keeps it red.
+		if s.t and GetTime() - s.t < BUFF_GRACE and byPos ~= false then
+			follows, r, how = false, true, "just placed"
+		else
+			r, how, dist = nil, "game-drawn buff", nil
+		end
+	end
+	if r ~= nil and not guessed then s.sure = r end   -- the last clear answer (a best guess is not one)
+	local held                                      -- no source at all (no position, buff hidden): the last clear answer keeps its tint
 	if r == nil and how == "unknown" then held = s.sure end
 	local key = tostring(follows) .. tostring(r) .. how .. tostring(buff ~= nil and byPos ~= nil and buff ~= byPos) .. tostring(held)
 	if s.last ~= key then
@@ -766,14 +779,11 @@ local function layout()
 end
 
 local function setMark(b, r, follows)
-	-- check (in range) and cross (out of range) are separate options. The "?" (unknown) is NOT optional: with both marks
-	-- off, an unknown answer used to look exactly like "in range" (seen in a dungeon, where no position can be read and
-	-- the buff is hidden in a fight: every totem looked fine)
-	local want = not follows and (r == nil or (r and db.showRange) or (r == false and db.showOut))
+	-- check (in range) and cross (out of range) are separate options. There is no "?" any more: when nothing can be
+	-- known (no position, no buff) the icon just shows no mark
+	local want = not follows and ((r and db.showRange) or (r == false and db.showOut))
 	if not want then b.mark:Hide() return end
-	-- unknown gets its own yellow "?" so a blank is never mistaken for "in range"
-	b.mark:SetTexture(r == nil and "Interface\\RaidFrame\\ReadyCheck-Waiting"
-		or r and "Interface\\RaidFrame\\ReadyCheck-Ready" or "Interface\\RaidFrame\\ReadyCheck-NotReady")
+	b.mark:SetTexture(r and "Interface\\RaidFrame\\ReadyCheck-Ready" or "Interface\\RaidFrame\\ReadyCheck-NotReady")
 	b.mark:Show()
 end
 
@@ -1892,7 +1902,7 @@ end
 -- Safety net. The bar only learns about a totem from PLAYER_TOTEM_UPDATE, and its own tick stops while the
 -- bar is hidden (which is exactly when it is empty). If an event is ever missed, a totem that is out would
 -- stay invisible until combat ends or a loading screen. So a frame that is never hidden looks for totems
--- the bar does not show. Position unknown => the "?" mark, never a guessed in/out of range.
+-- the bar does not show. Position unknown => no mark.
 local function rescan()
 	if previewing or not bar then return end
 	local found = false

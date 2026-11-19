@@ -367,13 +367,13 @@ inCombat = true
 local realAura = C_UnitAuras.GetAuraDataBySpellName
 C_UnitAuras.GetAuraDataBySpellName = function() error("restricted") end
 t = t + 1; tick()
-check(btn(2).mark.shown and btn(2).mark.tex:find("Waiting"), "no position and no buff reading -> yellow ? (unknown), not blank")
+check(btn(2).mark.shown == false, "no position and no buff reading -> no mark at all (never a ?)")
 C_UnitAuras.GetAuraDataBySpellName = realAura
 C_UnitAuras.GetAuraDataBySpellName = realAura
 inCombat = false
 -- a fight hides auras: the lookup says "nothing" although the buff is there. That is not "out of range".
 auras["Strength of Earth"] = {}; AURAS_HIDDEN = true; inCombat = true; tick()
-check(btn(2).mark.shown and btn(2).mark.tex:find("Waiting") and not btn(2).mark.tex:find("NotReady"), "REPORTED CLASS: no position, auras hidden in a fight, buff present: yellow ?, never 'out of range'")
+check(btn(2).mark.shown == false, "REPORTED CLASS: no position, auras hidden in a fight, buff present: no mark, never 'out of range'")
 AURAS_HIDDEN = false; inCombat = false; t = t + 1; tick()
 check(btn(2).mark.tex:find("Ready") and not btn(2).mark.tex:find("NotReady"), "fight over: the buff reading is trusted again")
 BUFF_READS = false
@@ -460,7 +460,7 @@ check(btn(3).mark.tex:find("Ready") and not btn(3).mark.tex:find("NotReady"), "m
 pos = { y = 500, x = 540, map = 1 }; tick()
 check(btn(3).mark.tex:find("NotReady"), "map source: 40 yd from Searing is out")
 mapOn = false; tick()
-check(btn(3).mark.tex:find("Waiting"), "both sources blocked -> ? not a stale answer")
+check(btn(3).mark.shown == false, "both sources blocked -> no mark, not a stale answer")
 mapOn = true; UnitPosition = realUP
 totems[3] = nil; fire("PLAYER_TOTEM_UPDATE", 3)
 pos = nil
@@ -1192,6 +1192,7 @@ end
 do
 	local function mark(slot)
 		local tx = btn(slot).mark.tex or ""
+		if btn(slot).mark.shown == false then return "none" end
 		if tx:find("NotReady") then return "out" elseif tx:find("Waiting") then return "?" elseif tx:find("Ready") then return "in" end
 		return "none"
 	end
@@ -1260,9 +1261,9 @@ do
 	calls = 0
 	at(10); check(mark(2) == "in", "range fight: 10 yd of 30: in")
 	at(22); check(mark(2) == "in", "range fight: 22 yd of 30 (a band of 4): still in")
-	at(27); check(mark(2) == "?", "range fight: 27 yd: close to the edge, so 'can't tell' (yellow ?), not a guess")
-	at(30); check(mark(2) == "?", "range fight: right at the edge: ?")
-	at(33); check(mark(2) == "?", "range fight: 33 yd: ?")
+	at(27); check(mark(2) == "in", "range fight: 27 yd: near the edge, the best guess (the radius): in")
+	at(30); check(mark(2) == "in", "range fight: right at the edge: in (best guess)")
+	at(33); check(mark(2) == "out", "range fight: 33 yd: near the edge, the best guess: out")
 	at(35); check(mark(2) == "out", "range fight: 35 yd: out")
 	check(calls == 0, "range fight: no aura read while the game hides them (" .. calls .. ")")
 	check(btn(2).dist.shown, "range fight: the distance still shows at the edge")
@@ -1271,15 +1272,15 @@ do
 	-- totems without a buff only have the position: the same band, narrower for a small totem
 	place(1, "Searing Totem")                              -- 20 yd, band 4
 	at(15); check(mark(1) == "in", "range: Searing, 15 of 20: in")
-	at(18); check(mark(1) == "?", "range: Searing, 18 of 20: ?")
+	at(18); check(mark(1) == "in", "range: Searing, 18 of 20: in (best guess)")
 	at(25); check(mark(1) == "out", "range: Searing, 25 of 20: out")
 	place(1, "Earthbind Totem")                            -- 10 yd, band 3 (a third of it at most)
 	at(6); check(mark(1) == "in", "range: Earthbind, 6 of 10: in")
-	at(8); check(mark(1) == "?", "range: Earthbind, 8 of 10: ?")
+	at(8); check(mark(1) == "in", "range: Earthbind, 8 of 10: in (best guess)")
 	at(14); check(mark(1) == "out", "range: Earthbind, 14 of 10: out")
 	place(1, "Stoneclaw Totem")                            -- 8 yd, band 2.4
 	at(5); check(mark(1) == "in", "range: Stoneclaw, 5 of 8: in")
-	at(9); check(mark(1) == "?", "range: Stoneclaw, 9 of 8: ?")
+	at(9); check(mark(1) == "out", "range: Stoneclaw, 9 of 8: out (best guess)")
 	at(11); check(mark(1) == "out", "range: Stoneclaw, 11 of 8: out")
 
 	-- the buff totem with the buff readable but no position at all: the buff alone, as before
@@ -1288,7 +1289,7 @@ do
 	check(mark(2) == "in" and not btn(2).dist.shown, "range: no position, buff present: in, no number")
 	-- the buff cannot be read (an error) and there is no position: unknown, never out
 	BUFF_READS = false; t = t + 1; tick()
-	check(mark(2) == "?", "range: neither buff nor position: ?")
+	check(mark(2) == "none", "range: neither buff nor position: no mark")
 	-- the tooltip says how it was decided
 	pos = { y = 0, x = 27, map = 1 }; AURAS_HIDDEN = true; inCombat = true; place(2, "Strength of Earth Totem IV"); at(27)
 	local tips = {}
@@ -3255,14 +3256,14 @@ do
 	local function settle() runTimers(); runTimers() end
 	local function lineCount(pat) local n = 0; for _, l in ipairs(ShamanKitLogDB.lines or {}) do if l:find(pat) then n = n + 1 end end return n end
 	clear()
-	local keep = { CONTAINER_FAILS, db.buffBadge, db.shieldOn }
-	CONTAINER_FAILS = false; db.buffBadge = true; db.shieldOn = false
+	local keep = { CONTAINER_FAILS, db.buffBadge, db.shieldOn, db.buffFollow }
+	CONTAINER_FAILS = false; db.buffBadge = true; db.shieldOn = false; db.buffFollow = false   -- the corner flavour first; follow is the product
 	S.failed = false; S.boxes = {}; S.nboxes = 0
 	db.buffIds = nil
 	BUFF_READS = true
 	pos = { y = 0, x = 0, map = 1 }
 	t = t + 10
-	check(ns.defaults.buffBadge == false and ns.defaults.buffFollow == false, "badges: off by default (one tick box, unticked)")
+	check(ns.defaults.buffBadge == true and ns.defaults.buffFollow == true, "badges: the red/bright icon is on by default (no setting)")
 	check(#ns.BADGE_EVENTS == 2, "badges: two events")
 
 	-- the first time the buff can be read, its spell id is learned
@@ -3335,22 +3336,11 @@ do
 	check(not S.boxes["8076b"].c.shown and not S.boxes["8076b"].c.enabled, "badges: switched off: gone")
 	db.buffBadge = true; ns.badgeSchedule(); settle()
 	check(S.boxes["8076b"].c.shown == true, "badges: switched on again: back")
-	local bm
-	for _, f in ipairs(frames) do if f.settingKey == "buffFollow" and f.parentFrame == savedCat.pages[2] then bm = f end end
-	check(bm ~= nil, "badges: one tick box on the Totem bar page")
-	local nradio = 0
-	for _, f in ipairs(frames) do if (f.value == "corner" or f.value == "follow" or f.value == "none") and f.parentFrame == savedCat.pages[2] then nradio = nradio + 1 end end
-	check(nradio == 0, "badges: the three-way choice is gone")
-	db.buffBadge = false; db.buffFollow = false; savedCat.pages[2].OnShow(); bm:SetChecked(true); bm.scripts.OnClick(bm); settle()
-	check(db.buffBadge == true and db.buffFollow == true and bm.checked, "badges: ticking sets both")
-	bm:SetChecked(false); bm.scripts.OnClick(bm); settle()
-	check(db.buffBadge == false and db.buffFollow == false and not bm.checked and not S.boxes["8076b"].c.shown, "badges: unticking hides them at once")
-	db.buffBadge = true; db.buffFollow = false; bm.refresh()
-	check(not bm.checked, "badges: a half-set old value reads as unticked")
-	db.buffBadge = false; db.buffFollow = true; bm.refresh()
-	check(not bm.checked, "badges: follow without the badge reads as unticked")
-	db.buffBadge = true; db.buffFollow = true; savedCat.pages[2].OnDefault()
-	check(db.buffBadge == false and db.buffFollow == false and not bm.checked, "badges: the page's Defaults: unticked")
+	local nbox = 0
+	for _, f in ipairs(frames) do if (f.settingKey == "buffFollow" or f.settingKey == "buffBadge" or f.value == "corner" or f.value == "follow") and f.parentFrame == savedCat.pages[2] then nbox = nbox + 1 end end
+	check(nbox == 0, "badges: no setting for it on the Totem bar page any more")
+	db.buffBadge = false; db.buffFollow = false; savedCat.pages[2].OnDefault()
+	check(db.buffBadge == false and db.buffFollow == false, "badges: the page's Defaults leave it alone")
 	db.buffBadge = true   -- the tests below use the corner picture
 	settle()
 
@@ -3421,6 +3411,17 @@ do
 		check(fb.button.iconTex == nil and S.boxes["8076f"].button.sizeAtInit == db.size, "follow: the game's own buff picture is not used, and it is the icon's size from the start (" .. tostring(fb.button.sizeAtInit) .. ")")
 		check(fb.icon ~= nil and fb.icon.tex ~= nil and fb.icon.tex == btn(2).icon.tex, "follow: it shows the totem's own picture (" .. tostring(fb.icon and fb.icon.tex) .. ")")
 		check(ns.badgeFollows(2, "Strength of Earth") == true and ns.badgeFollows(2, "Stoneskin") == false and ns.badgeFollows(3, "Strength of Earth") == false, "follow: armed for that totem in that place only")
+		-- just dropped, in a fight: next to you, the buff is on its way: not red. Ran off at once: red.
+		AURAS_HIDDEN = true; inCombat = true
+		pos = { y = 0, x = 1, map = 1 }; tick()
+		check(plain(btn(2)) and select(5, ns.rangeOf(2)) == false and select(1, ns.rangeOf(2)) == true, "follow: a totem you just dropped is not red while its buff is on the way")
+		pos = nil; mapOn = false; tick()
+		check(plain(btn(2)), "follow: ...also with no position to read (a dungeon)")
+		pos = { y = 0, x = 100, map = 1 }; mapOn = true; tick()
+		check(red(btn(2)), "follow: ...but clearly far away at once: red")
+		pos = { y = 0, x = 0, map = 1 }; t = t + 4; tick()
+		check(red(btn(2)) and select(5, ns.rangeOf(2)) == true, "follow: after a few seconds with no buff: red (the game's picture covers it when the buff is on)")
+		AURAS_HIDDEN = false; inCombat = false; t = t + 1; tick()
 		-- out of a fight the buff still answers, exactly
 		auras["Strength of Earth"] = { spellId = 8076 }; t = t + 1; tick()
 		check(plain(btn(2)) and not waiting(btn(2)), "follow: out of a fight, with the buff: in range")
@@ -3446,7 +3447,9 @@ do
 		check(not select(5, ns.rangeOf(2)), "follow: another totem arriving in a fight is not covered by the old container")
 		totems[2] = { name = "Strength of Earth Totem IV", start = t, dur = 120, icon = 8 }
 		fire("PLAYER_TOTEM_UPDATE", 2); tick()
-		check(select(5, ns.rangeOf(2)) == true, "follow: ...and the same totem again is")
+		check(select(5, ns.rangeOf(2)) == false and plain(btn(2)), "follow: ...the same totem again is just dropped: not red yet")
+		t = t + 4; tick()
+		check(select(5, ns.rangeOf(2)) == true, "follow: ...and a few seconds later it is covered")
 		totems[1] = { name = "Searing Totem III", start = t, dur = 60, icon = 7 }
 		fire("PLAYER_TOTEM_UPDATE", 1); t = t + 1; tick()
 		check(select(5, ns.rangeOf(1)) == false and not red(btn(1)), "follow: a totem with no buff is judged by its position as before")
@@ -3503,7 +3506,7 @@ do
 	check(joined:find("buff badges") ~= nil, "badges: (status ran)")
 
 	clear()
-	CONTAINER_FAILS, db.buffBadge, db.shieldOn = keep[1], keep[2], keep[3]
+	CONTAINER_FAILS, db.buffBadge, db.shieldOn, db.buffFollow = keep[1], keep[2], keep[3], keep[4]
 	S.failed = false; S.boxes = {}; S.nboxes = 0; db.buffIds = nil
 	BUFF_READS = false; auras["Strength of Earth"] = nil; auras["Windfury Totem"] = nil
 	noErrors("badges: nothing raised an error in the log")
@@ -3538,7 +3541,7 @@ do
 	-- a fight begins: the buff can't be read and there is no position: the last answer stands, with a "?"
 	AURAS_HIDDEN = true; inCombat = true; t = t + 1; tick()
 	check(red(btn(2)), "dungeon fight: a totem that was red stays red (it must not light up as if you were next to it)")
-	check(waiting(btn(2)), "dungeon fight: ...and says '?', even with the check and cross switched off")
+	check(btn(2).mark.shown == false, "dungeon fight: ...with no mark (never a ?)")
 	-- one that was in range stays plain, but is marked as unsure
 	AURAS_HIDDEN = false; inCombat = false
 	auras["Mana Spring"] = {}
@@ -3546,11 +3549,11 @@ do
 	fire("PLAYER_TOTEM_UPDATE", 3); t = t + 4; tick()
 	check(plain(btn(3)) and btn(3).mark.shown == false, "dungeon: another totem with its buff: plain")
 	AURAS_HIDDEN = true; inCombat = true; t = t + 1; tick()
-	check(plain(btn(3)) and waiting(btn(3)), "dungeon fight: one that was in range stays plain, with the '?'")
+	check(plain(btn(3)) and btn(3).mark.shown == false, "dungeon fight: one that was in range stays plain, no mark")
 	-- a totem dropped in the fight: nothing is known about it
 	totems[4] = { name = "Windfury Totem", start = t, dur = 300, icon = 10 }
 	fire("PLAYER_TOTEM_UPDATE", 4); tick()
-	check(plain(btn(4)) and waiting(btn(4)), "dungeon fight: a new totem is unknown: plain, with the '?'")
+	check(plain(btn(4)) and btn(4).mark.shown == false, "dungeon fight: a new totem with nothing known: plain, no mark")
 	-- the status line and the tooltip say what is going on
 	local out = {}
 	local pr = print; print = function(...) out[#out + 1] = table.concat({ ... }, " ") end
@@ -3569,7 +3572,7 @@ do
 	-- the old totem's last answer is not inherited by a new totem in the same place
 	totems[2] = { name = "Strength of Earth Totem", start = t + 1, dur = 300, icon = 8 }
 	fire("PLAYER_TOTEM_UPDATE", 2); tick()
-	check(plain(btn(2)) and waiting(btn(2)), "dungeon fight: a new totem in a place that held a red one starts unknown, not red")
+	check(plain(btn(2)) and btn(2).mark.shown == false, "dungeon fight: a new totem in a place that held a red one starts plain, not red")
 	-- the fight ends: the buff speaks again
 	AURAS_HIDDEN = false; inCombat = false; auras["Strength of Earth"] = {}; auras["Mana Spring"] = nil; t = t + 4
 	fire("PLAYER_REGEN_ENABLED"); tick()
@@ -3587,7 +3590,8 @@ do
 	pos = { y = 0, x = 40, map = 1 }; tick()
 	check(red(btn(1)), "edge: 40 yd from a 20 yd totem: red")
 	pos = { y = 0, x = 20, map = 1 }; tick()
-	check(plain(btn(1)) and waiting(btn(1)), "edge: at the edge: plain with the '?', the old red is not held (the position is readable)")
+	check(plain(btn(1)) and btn(1).mark.shown == false and not waiting(btn(1)), "edge: at the edge: plain (best guess: in), no ?, the old red is not held (the position is readable)")
+	check(ns.barState(1).sure == false, "edge: a best guess is not remembered as a clear answer")
 
 	-- learning where THIS totem's edge is: the buff read out of a fight narrows the "?" band for the next fight
 	clear(); BUFF_READS = true; pos = { y = 0, x = 0, map = 1 }; mapOn = true; t = t + 10
@@ -3600,7 +3604,7 @@ do
 	end
 	local function fightAt(x) AURAS_HIDDEN = true; inCombat = true; pos = { y = 0, x = x, map = 1 }; t = t + 1; tick() end
 	local function fightOver() AURAS_HIDDEN = false; inCombat = false end
-	fightAt(27); check(plain(btn(2)) and waiting(btn(2)), "learn: before anything is learned 27 of 30 is a '?'"); fightOver()
+	fightAt(27); check(plain(btn(2)) and not waiting(btn(2)), "learn: before anything is learned 27 of 30 is a best guess: in, no ?"); fightOver()
 	hold(31, true)
 	hold(32, false)
 	check(ns.barState(2).lo == 31 and ns.barState(2).hi == 32, "learn: on at 31, off at 32 (" .. tostring(ns.barState(2).lo) .. "," .. tostring(ns.barState(2).hi) .. ")")
@@ -3642,11 +3646,13 @@ do
 	-- one side known
 	local st2 = ns.barState(2)
 	st2.lo, st2.hi = 31, nil; fightAt(30); check(plain(btn(2)) and not waiting(btn(2)), "learn: on at 31 only: 30 is in")
-	fightAt(33); check(waiting(btn(2)), "learn: ...and 33 is still unsure")
+	fightAt(33); check(red(btn(2)) and not waiting(btn(2)), "learn: ...and 33 is a best guess by the radius: out, no ?")
 	st2.lo, st2.hi = nil, 28; fightAt(29); check(red(btn(2)) and not waiting(btn(2)), "learn: off at 28 only: 29 is out")
-	fightAt(27); check(waiting(btn(2)), "learn: ...and 27 is unsure")
-	-- a wide gap stays unsure
-	st2.lo, st2.hi = 26, 34; fightAt(30); check(waiting(btn(2)), "learn: on at 26, off at 34: 30 is unsure")
+	fightAt(27); check(plain(btn(2)) and not waiting(btn(2)), "learn: ...and 27 is a best guess by the radius: in, no ?")
+	-- a wide gap is a guess at the middle
+	st2.lo, st2.hi = 26, 34; fightAt(29.5); check(plain(btn(2)) and not waiting(btn(2)), "learn: on at 26, off at 34: 29.5 is a best guess by the middle (30): in, no ?")
+	fightAt(30.5); check(red(btn(2)) and not waiting(btn(2)), "learn: ...30.5 is out, no ?")
+	st2.lo, st2.hi = 24, 32; fightAt(29); check(red(btn(2)) and not waiting(btn(2)), "learn: a wide gap is guessed at its middle (28), not at the radius (30)")
 	fightAt(25); check(plain(btn(2)) and not waiting(btn(2)), "learn: ...25 is in")
 	fightAt(35); check(red(btn(2)) and not waiting(btn(2)), "learn: ...35 is out")
 	st2.lo, st2.hi = 31, 32; fightAt(30.5); check(plain(btn(2)) and not waiting(btn(2)), "learn: narrow gap: below the middle is in")
@@ -4159,7 +4165,7 @@ do
 		cureWash = true, cureWashAlpha = 65, cureSize = 29, cureSpacing = 4, curePoint = "BOTTOM", cureRelPoint = "BOTTOM", cureX = -482, cureY = 337,
 		callOn = false, callTotemic = true, callRecall = false, callShow = "bar", callScale = 55, callSide = "right", callAnchor = "bar", callAlign = "start", callChoice = 0,
 		posCallOwn = true, posCallSide = "left", posCallAlign = "start", posTotemicOwn = true, posTotemicSide = "top", posTotemicAlign = "center",
-		posRecallOwn = true, posRecallSide = "right", posRecallAlign = "start", showAdvanced = false, buffBadge = false,
+		posRecallOwn = true, posRecallSide = "right", posRecallAlign = "start", showAdvanced = false, buffBadge = true,
 	}
 	local bad = {}
 	for k, v in pairs(want) do if SHIPPED[k] ~= v then bad[#bad + 1] = k .. "=" .. tostring(SHIPPED[k]) end end
@@ -4176,16 +4182,16 @@ do
 	ShamanKitDB = { size = 50, reserve = {} }
 	fire("ADDON_LOADED", "ShamanKit")
 	check(ShamanKitDB.size == 50 and ShamanKitDB.spacing == 6 and next(ShamanKitDB.reserve) == nil, "existing install: saved values stay, missing ones are filled")
-	-- 0.22: an older install that showed the corner picture ends up unticked; one that had follow mode stays ticked
+	-- 0.22.1: the red/bright icon in a fight is always on, whatever an older install saved
+	ShamanKitDB = { buffBadge = false, buffFollow = false }
+	fire("ADDON_LOADED", "ShamanKit")
+	check(ShamanKitDB.buffBadge == true and ShamanKitDB.buffFollow == true, "old install with it off: on now")
 	ShamanKitDB = { buffBadge = true, buffFollow = false }
 	fire("ADDON_LOADED", "ShamanKit")
-	check(ShamanKitDB.buffBadge == false and ShamanKitDB.buffFollow == false, "old corner-picture install: unticked, no picture")
-	ShamanKitDB = { buffBadge = true, buffFollow = true }
-	fire("ADDON_LOADED", "ShamanKit")
-	check(ShamanKitDB.buffBadge == true and ShamanKitDB.buffFollow == true, "old follow-mode install: stays ticked")
+	check(ShamanKitDB.buffBadge == true and ShamanKitDB.buffFollow == true, "old corner-picture install: follow mode now")
 	ShamanKitDB = nil
 	fire("ADDON_LOADED", "ShamanKit")
-	check(ShamanKitDB.buffBadge == false and ShamanKitDB.buffFollow == false, "fresh install: unticked")
+	check(ShamanKitDB.buffBadge == true and ShamanKitDB.buffFollow == true, "fresh install: on")
 end
 
 check(#printedErrors == 0, "the addon never printed an error line during the whole run" .. (printedErrors[1] and (": " .. printedErrors[1]) or ""))
