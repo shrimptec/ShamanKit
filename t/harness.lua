@@ -176,9 +176,13 @@ local auras = {}
 C_StringUtil = { CreateNumericRuleFormatter = function() return { FormatNumber = function(_, n) return tostring(n) end } end }
 AURAS_HIDDEN = false   -- a fight: the game hides auras
 IDAURAS = {}           -- what a lookup by spell id still answers while they are hidden
+BUFF_READS = false     -- the totem BUFFS can be read (out of a fight). Off by default: the older range tests are about the position alone
+TOTEM_BUFF = { ["Strength of Earth"] = true, ["Stoneskin"] = true, ["Healing Stream"] = true, ["Mana Spring"] = true, ["Frost Resistance"] = true,
+	["Fire Resistance"] = true, ["Nature Resistance"] = true, ["Grace of Air"] = true, ["Windwall"] = true, ["Windfury Totem"] = true, ["Flametongue Totem"] = true }
 C_Secrets = { ShouldAurasBeSecret = function() return AURAS_HIDDEN end }
 C_UnitAuras = {
 	GetAuraDataBySpellName = function(_, name)
+		if TOTEM_BUFF[name] and not BUFF_READS then error("not readable in this test") end
 		if secretPos then return secret() end
 		if AURAS_HIDDEN then return nil end     -- seen in the real log: "nothing", not a secret, even though the aura is there
 		return auras[name]
@@ -331,15 +335,16 @@ totems[1] = nil; fire("PLAYER_TOTEM_UPDATE", 1)
 check(not btn(1).shown, "expired totem hidden")
 
 -- position unavailable (instance) -> buff fallback for a buff totem
+BUFF_READS = true
 pos = nil
-auras["Strength of Earth"] = nil; tick()
+auras["Strength of Earth"] = nil; t = t + 5; tick()
 check(btn(2).mark.tex:find("NotReady"), "no position, no buff -> out of range")
-auras["Strength of Earth"] = {}; tick()
+auras["Strength of Earth"] = {}; t = t + 1; tick()
 check(btn(2).mark.tex:find("Ready") and not btn(2).mark.tex:find("NotReady"), "no position, buff present -> in range")
 inCombat = true
 local realAura = C_UnitAuras.GetAuraDataBySpellName
 C_UnitAuras.GetAuraDataBySpellName = function() error("restricted") end
-tick()
+t = t + 1; tick()
 check(btn(2).mark.shown and btn(2).mark.tex:find("Waiting"), "no position and no buff reading -> yellow ? (unknown), not blank")
 C_UnitAuras.GetAuraDataBySpellName = realAura
 C_UnitAuras.GetAuraDataBySpellName = realAura
@@ -347,8 +352,9 @@ inCombat = false
 -- a fight hides auras: the lookup says "nothing" although the buff is there. That is not "out of range".
 auras["Strength of Earth"] = {}; AURAS_HIDDEN = true; inCombat = true; tick()
 check(btn(2).mark.shown and btn(2).mark.tex:find("Waiting") and not btn(2).mark.tex:find("NotReady"), "REPORTED CLASS: no position, auras hidden in a fight, buff present: yellow ?, never 'out of range'")
-AURAS_HIDDEN = false; inCombat = false; tick()
+AURAS_HIDDEN = false; inCombat = false; t = t + 1; tick()
 check(btn(2).mark.tex:find("Ready") and not btn(2).mark.tex:find("NotReady"), "fight over: the buff reading is trusted again")
+BUFF_READS = false
 
 -- Totemic Call: walk out of range, cast it, totems follow you
 totems[2] = { name = "Strength of Earth Totem IV", start = t, dur = 300, icon = 99 }
@@ -441,8 +447,10 @@ pos = nil
 for k in pairs(totems) do if k ~= 2 then totems[k] = nil end end
 fire("PLAYER_ENTERING_WORLD")
 check(btn(2).shown, "totem present after reload is shown")
-pos = { y = 0, x = 0, map = 1 }; auras["Strength of Earth"] = nil; tick()
+BUFF_READS = true
+pos = { y = 0, x = 0, map = 1 }; auras["Strength of Earth"] = nil; t = t + 1; tick()
 check(btn(2).mark.tex:find("NotReady"), "after reload falls back to buff (absent -> out)")
+BUFF_READS = false
 
 -- settings: preview while open, changes apply
 local panel = savedCat.panel
@@ -543,7 +551,7 @@ do
 	for _, line in ipairs(ShamanKitDB.log or {}) do if line:find("RESCAN found slot 3") then logged = true end end
 	check(logged, "...and logs that it caught a missed event")
 	-- it must not invent a position: with none recorded the mark is the unknown one, never a green "in range"
-	check(not btn(3).mark.tex:find("Ready") or btn(3).mark.tex:find("NotReady"), "...with unknown range, not a guessed green tick")
+	check(not btn(3).mark.tex:find("ReadyCheck%-Ready"), "...with unknown range, not a guessed green tick")
 	totems = {}
 	for slot = 1, 4 do fire("PLAYER_TOTEM_UPDATE", slot) end
 	rescan()
@@ -598,8 +606,8 @@ do
 	pos = { y = 0, x = 25, map = 1 }; tick()
 	check(near(g(2).value, 1 / 6) and g(2).sbcolor[1] > 0.9 and g(2).sbcolor[2] < 0.5, "25 of 30 yd: nearly out, orange")
 	check(g(2).edge.color[1] < 0.3, "...frame still dark while in range")
-	pos = { y = 0, x = 31, map = 1 }; tick()
-	check(g(2).value == 0 and g(2).edge.color[1] > 0.7 and g(2).edge.color[2] < 0.3, "31 yd: empty bar with a red frame")
+	pos = { y = 0, x = 35, map = 1 }; tick()
+	check(g(2).value == 0 and g(2).edge.color[1] > 0.7 and g(2).edge.color[2] < 0.3, "35 yd: empty bar with a red frame")
 	pos = { y = 0, x = 200, map = 1 }; tick()
 	check(g(2).value == 0 and g(2).shown, "far away: still just empty (never negative, never beyond)")
 	pos = { y = 0, x = 0, map = 1 }; tick()
@@ -1152,6 +1160,120 @@ do
 end
 
 -- ---- weapon enchant + Lightning Shield icons
+-- ---- Range: the buff is the truth when it can be read, and the position only answers clearly (a totem lands to your side)
+do
+	local function mark(slot)
+		local tx = btn(slot).mark.tex or ""
+		if tx:find("NotReady") then return "out" elseif tx:find("Waiting") then return "?" elseif tx:find("Ready") then return "in" end
+		return "none"
+	end
+	local function place(slot, name, at)
+		totems[slot] = { name = name, start = t, dur = 300, icon = 99 }
+		pos = at or { y = 0, x = 0, map = 1 }
+		fire("PLAYER_TOTEM_UPDATE", slot)
+	end
+	local function at(x) pos = { y = 0, x = x, map = 1 }; t = t + 1; tick() end
+	local function clear() for k in pairs(totems) do totems[k] = nil end; fire("PLAYER_ENTERING_WORLD"); auras["Strength of Earth"] = nil; BUFF_READS = false; AURAS_HIDDEN = false; inCombat = false; pos = { y = 0, x = 0, map = 1 } end
+	clear(); ShamanKitDB.distanceMode = "yards"; ShamanKitDB.log = {}
+	local calls = 0
+	local real = C_UnitAuras.GetAuraDataBySpellName
+	C_UnitAuras.GetAuraDataBySpellName = function(...) calls = calls + 1; return real(...) end
+
+	-- just dropped: the buff is not on yet, and that must not read as "out of range"
+	BUFF_READS = true
+	place(2, "Strength of Earth Totem IV")
+	t = t + 1; tick()
+	check(mark(2) == "in", "range: just dropped, no buff yet: the position decides (in), not a red cross")
+	pos = { y = 0, x = 40, map = 1 }; t = t + 1; tick()
+	check(mark(2) == "out", "range: ...but if the position says clearly out it is out")
+	pos = { y = 0, x = 5, map = 1 }; t = t + 4; tick()
+	check(mark(2) == "out", "range: after a few seconds with no buff, no buff means out")
+	-- the buff can be read: it decides, whatever the position says
+	place(2, "Strength of Earth Totem IV")
+	auras["Strength of Earth"] = {}
+	at(10)
+	check(mark(2) == "in", "range: buff present, 10 yd: in")
+	at(40)
+	check(mark(2) == "in", "range: the buff is there at 40 yd by my position: in (the totem is not where I stood)")
+	check(btn(2).dist.text == "29.1 yd", "range: ...and the number agrees with the answer, not 40 (" .. tostring(btn(2).dist.text) .. ")")
+	auras["Strength of Earth"] = nil
+	t = t + 5
+	at(5)
+	check(mark(2) == "out", "range: no buff, 5 yd: out (a totem a few yards off does not read as 'in' by position)")
+	check(btn(2).dist.text == "30.9 yd", "range: ...and the number does not say 5 (" .. tostring(btn(2).dist.text) .. ")")
+	local n = 0
+	for _, l in ipairs(ShamanKitDB.log) do
+		if (l:find("%-> true via buff") and l:find("positionSays=false")) or (l:find("%-> false via buff") and l:find("positionSays=true")) then n = n + 1 end
+	end
+	check(n == 3, "range: the log notes each time the buff and the position disagree, once (" .. n .. ")")
+	local before = #ShamanKitDB.log
+	for _ = 1, 12 do t = t + 0.3; tick() end
+	check(#ShamanKitDB.log == before, "range: the same answer again and again adds nothing to the log")
+	check(ShamanKitDB.log[#ShamanKitDB.log]:find("placed u=") ~= nil, "range: ...with both positions, so the real offset can be worked out")
+
+	-- it is only read every half second per totem
+	auras["Strength of Earth"] = {}
+	t = t + 1; tick()
+	calls = 0
+	for _ = 1, 40 do tick() end
+	check(calls == 0, "range: ten ticks inside half a second read nothing again (" .. calls .. ")")
+	t = t + 0.6; tick(); tick()
+	check(calls == 1, "range: after half a second, one read (" .. calls .. ")")
+	-- a new totem in the place: the last reading belonged to the old one
+	auras["Strength of Earth"] = nil
+	place(2, "Strength of Earth Totem IV")
+	t = t + 4; tick()
+	check(mark(2) == "out", "range: a new totem in the place reads fresh, not the old totem's buff")
+
+	-- a fight: auras are hidden, nothing is read, the position answers only when it is clear
+	auras["Strength of Earth"] = {}
+	AURAS_HIDDEN = true; inCombat = true
+	place(2, "Strength of Earth Totem IV")
+	calls = 0
+	at(10); check(mark(2) == "in", "range fight: 10 yd of 30: in")
+	at(22); check(mark(2) == "in", "range fight: 22 yd of 30 (a band of 4): still in")
+	at(27); check(mark(2) == "?", "range fight: 27 yd: close to the edge, so 'can't tell' (yellow ?), not a guess")
+	at(30); check(mark(2) == "?", "range fight: right at the edge: ?")
+	at(33); check(mark(2) == "?", "range fight: 33 yd: ?")
+	at(35); check(mark(2) == "out", "range fight: 35 yd: out")
+	check(calls == 0, "range fight: no aura read while the game hides them (" .. calls .. ")")
+	check(btn(2).dist.shown, "range fight: the distance still shows at the edge")
+	AURAS_HIDDEN = false; inCombat = false
+
+	-- totems without a buff only have the position: the same band, narrower for a small totem
+	place(1, "Searing Totem")                              -- 20 yd, band 4
+	at(15); check(mark(1) == "in", "range: Searing, 15 of 20: in")
+	at(18); check(mark(1) == "?", "range: Searing, 18 of 20: ?")
+	at(25); check(mark(1) == "out", "range: Searing, 25 of 20: out")
+	place(1, "Earthbind Totem")                            -- 10 yd, band 3 (a third of it at most)
+	at(6); check(mark(1) == "in", "range: Earthbind, 6 of 10: in")
+	at(8); check(mark(1) == "?", "range: Earthbind, 8 of 10: ?")
+	at(14); check(mark(1) == "out", "range: Earthbind, 14 of 10: out")
+	place(1, "Stoneclaw Totem")                            -- 8 yd, band 2.4
+	at(5); check(mark(1) == "in", "range: Stoneclaw, 5 of 8: in")
+	at(9); check(mark(1) == "?", "range: Stoneclaw, 9 of 8: ?")
+	at(11); check(mark(1) == "out", "range: Stoneclaw, 11 of 8: out")
+
+	-- the buff totem with the buff readable but no position at all: the buff alone, as before
+	place(2, "Strength of Earth Totem IV"); BUFF_READS = true
+	auras["Strength of Earth"] = {}; pos = nil; t = t + 1; tick()
+	check(mark(2) == "in" and not btn(2).dist.shown, "range: no position, buff present: in, no number")
+	-- the buff cannot be read (an error) and there is no position: unknown, never out
+	BUFF_READS = false; t = t + 1; tick()
+	check(mark(2) == "?", "range: neither buff nor position: ?")
+	-- the tooltip says how it was decided
+	pos = { y = 0, x = 27, map = 1 }; AURAS_HIDDEN = true; inCombat = true; place(2, "Strength of Earth Totem IV"); at(27)
+	local tips = {}
+	rawset(GameTooltip, "AddLine", function(_, text) tips[#tips + 1] = text end)
+	_G.ShamanKitHit2.scripts.OnEnter(_G.ShamanKitHit2)
+	rawset(GameTooltip, "AddLine", nil)
+	check(tips[#tips] and tostring(tips[#tips]):find("near the edge") and tostring(tips[#tips]):find("Range unknown") == nil, "range: the tooltip says 'near the edge' (" .. tostring(tips[#tips]) .. ")")
+	AURAS_HIDDEN = false; inCombat = false
+
+	C_UnitAuras.GetAuraDataBySpellName = real
+	clear(); ShamanKitDB.distanceMode = "bar"; ShamanKitDB.log = {}
+end
+
 -- ---- Cures: the cure spells light up while something they can remove is on you (Cures.lua)
 do
 	local db = ShamanKitDB

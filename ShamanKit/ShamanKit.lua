@@ -2,10 +2,11 @@
 --   Totem bar: your active totems, their timers, and whether you are in range of each.
 --   Buffs: two small icons, one for a missing / running-out weapon enchant and one for Lightning Shield charges.
 --
--- Totem range: a totem is dropped at your feet, so your position when it appears IS the totem's position.
--- Each tick the distance from there to you is compared to the totem's radius. If positions are
--- unavailable (instances, combat) a buff totem falls back to "do I have its buff", and if that is
--- unreadable too, nothing is marked (we never claim out of range unless we are sure).
+-- Totem range: a totem lands a few yards to one side of where you stood, so your position when it appears is
+-- only an estimate of the totem's. A buff totem is judged by its buff whenever the game lets an addon read it
+-- (out of a fight); otherwise the distance from your drop spot to you is compared to the totem's radius, and only
+-- a clear answer is given (near the edge it says "can't tell"). With neither available, nothing is marked (we
+-- never claim out of range unless we are sure).
 
 local ADDON, ns = ...
 ns.name = ADDON
@@ -383,38 +384,77 @@ local function describe(p)
 		tostring(p.mx and ("%.5f"):format(p.mx)), tostring(p.my and ("%.5f"):format(p.my)), tostring(p.mapID))
 end
 
--- true = in range, false = out, nil = unknown; second value says how it was decided
+-- A totem lands a few yards to one side of where you stood, not exactly under you, so the distance from your drop
+-- spot is only an estimate of the distance to the totem. Two things follow:
+--   * a buff totem is judged by its BUFF whenever the game lets an addon read it (out of a fight): that is exact;
+--   * from the position alone, only a clear answer is given. Within EDGE_BAND yards of the radius (a third of the
+--     radius at most, so a small totem keeps most of its circle) the answer is "can't tell" (the yellow ?).
+local EDGE_BAND = 4
+local BUFF_EVERY = 0.5      -- seconds between buff reads for one totem (the buff changes on the totem's pulse)
+local BUFF_GRACE = 3        -- a totem's buff takes a moment to arrive: no buff in the first seconds proves nothing
+
+local function edgeBand(range) return math.min(EDGE_BAND, range * 0.3) end
+
+-- what the estimate says: true / false when it is clear, nil inside the band around the edge
+local function fromDistance(dist, range)
+	local band = edgeBand(range)
+	if dist <= range - band then return true end
+	if dist >= range + band then return false end
+	return nil
+end
+
+-- the buff's answer for this totem: true / false, or nil (no buff to look for, or the game hides auras)
+local function fromBuff(s)
+	if not s.aura or aurasHidden() then return nil end
+	local t = GetTime()
+	if s.buffAt and t - s.buffAt < BUFF_EVERY then return s.buffVal end
+	s.buffAt = t
+	s.buffVal = hasAura(s.aura)
+	return s.buffVal
+end
+
+-- true = in range, false = out, nil = unknown; then how it was decided, then the distance estimate (a number that
+-- agrees with the answer: it is never shown as inside while the answer is out, or the other way round)
 local function rangeOf(slot, now)
 	local s = state[slot]
 	if not s then return nil end
 	now = now or playerPos()
 	local was = s.at
-	local r, how, dist
+	local r, how, dist, byPos
 	if was and was.ux and now.ux and now.umap == was.umap then
 		local dx, dy = now.ux - was.ux, now.uy - was.uy
 		dist = math.sqrt(dx * dx + dy * dy)
-		r, how = dist <= s.range, "position"
+		byPos, how = fromDistance(dist, s.range), "position"
 	else
 		if not now.mapRead then readMapPos(now) end   -- the yard position could not answer: ask the map
+		if was and was.mx and now.mx and now.mapID == was.mapID then
+			local dx, dy = (now.mx - was.mx) * now.mw, (now.my - was.my) * now.mh
+			dist = math.sqrt(dx * dx + dy * dy)
+			byPos, how = fromDistance(dist, s.range), "map position"
+		end
 	end
-	if how then
-		-- decided above
-	elseif was and was.mx and now.mx and now.mapID == was.mapID then
-		local dx, dy = (now.mx - was.mx) * now.mw, (now.my - was.my) * now.mh
-		dist = math.sqrt(dx * dx + dy * dy)
-		r, how = dist <= s.range, "map position"
-	elseif s.aura then
-		local a = hasAura(s.aura)
-		if a ~= nil then r, how = a, "buff" end
+	local buff = fromBuff(s)
+	if buff == false and s.t and GetTime() - s.t < BUFF_GRACE then buff = nil end   -- just dropped: the buff is not on yet
+	if buff ~= nil then
+		r, how = buff, "buff"
+		if dist then                                      -- keep the number and the answer consistent
+			if r and dist >= s.range then dist = s.range * 0.97
+			elseif not r and dist < s.range then dist = s.range * 1.03 end
+		end
+	elseif how then
+		r = byPos
+		if r == nil then how = how .. ", near the edge" end
+	else
+		how = "unknown"
 	end
-	how = how or "unknown"
-	local key = tostring(r) .. how
+	local key = tostring(r) .. how .. tostring(buff ~= nil and byPos ~= nil and buff ~= byPos)
 	if s.last ~= key then
 		s.last = key
 		if not now.mapRead then readMapPos(now) end   -- the log line wants both sources
-		dbg("slot %d %s -> %s via %s dist=%s range=%s | now %s | placed %s | combat=%s",
+		-- when the buff and the position disagree this line is the measurement of where the totem really is
+		dbg("slot %d %s -> %s via %s dist=%s range=%s positionSays=%s | now %s | placed %s | combat=%s",
 			slot, tostring(s.name), tostring(r), how, dist and ("%.1f"):format(dist) or "-", tostring(s.range),
-			describe(now), describe(was), tostring(InCombatLockdown()))
+			tostring(byPos), describe(now), describe(was), tostring(InCombatLockdown()))
 	end
 	return r, how, dist
 end
@@ -437,8 +477,12 @@ local function tooltip(self)
 	local s = state[self.slot]
 	if s and not previewing then
 		local r, how = rangeOf(self.slot)
-		local text = r == true and "In range" or r == false and "Out of range" or "Range unknown"
-		GameTooltip:AddLine(("%s (%d yd, by %s)"):format(text, s.range, how), 1, 1, 1)
+		if r == nil and how:find("near the edge", 1, true) then
+			GameTooltip:AddLine(("Can't tell, near the edge of its %d yd (the totem lands a little to one side)"):format(s.range), 1, 1, 1)
+		else
+			local text = r == true and "In range" or r == false and "Out of range" or "Range unknown"
+			GameTooltip:AddLine(("%s (%d yd, by %s)"):format(text, s.range, how), 1, 1, 1)
+		end
 	end
 	GameTooltip:Show()
 end
@@ -784,6 +828,7 @@ local function refreshSlot(slot, placed)
 		s.at = playerPos()
 		s.t = GetTime()
 		s.last = nil
+		s.buffAt, s.buffVal = nil, nil     -- a new totem: the last buff reading belonged to the old one
 		local known = (not isSecret(name) and type(name) == "string" and name ~= "") and name or recentCastName()
 		if known then s.name = known end
 		s.range, s.aura = classify(s.name)
@@ -791,6 +836,7 @@ local function refreshSlot(slot, placed)
 	elseif not s.name and not isSecret(name) and type(name) == "string" then
 		s.name = name
 		s.range, s.aura = classify(name)
+		s.buffAt, s.buffVal = nil, nil
 	end
 	s.range = s.range or DEFAULT_RANGE
 	s.start = readable(start) and start or nil   -- a new start time means the totem was dropped again
@@ -1691,6 +1737,7 @@ local function onTotemCast(id)
 				st.name = cast
 				st.range, st.aura = classify(cast)
 				st.last = nil
+				st.buffAt, st.buffVal = nil, nil
 				rememberSafe(slot, nil, cast)
 				dbg("named slot %d from cast: %s", slot, cast)
 			end
