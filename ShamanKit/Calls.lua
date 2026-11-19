@@ -5,7 +5,9 @@
 --   [Totemic Call]     brings your totems to you
 --   [Totemic Recall]   takes them back for mana
 --
--- Each button is optional (settings page "Call spells") and only shows when you know the spell.
+-- Each button is optional (settings page "Call spells") and only shows when you know the spell. They sit on a side of
+-- the totem bar (or in a place of their own, draggable), as big as you like, and show all the time or only while a
+-- totem is out.
 --
 -- Rules this file keeps (the bar next to it is restricted in combat, and so are these buttons):
 --   * the buttons are the game's own secure spell buttons: a click is one cast, decided by you;
@@ -22,7 +24,6 @@ local QUESTION = "Interface\\Icons\\INV_Misc_QuestionMark"
 local BEVEL = "Interface\\Buttons\\UI-Quickslot2"
 local WHITE = "Interface\\Buttons\\WHITE8x8"
 local ARROW = "Interface\\Buttons\\Arrow-Up-Up"
-local OUT_GAP = 6                 -- between the buttons and the totem bar
 local MAX_SLOTS = 4               -- places on the bar
 
 -- ---------------------------------------------------------------- settings
@@ -31,8 +32,14 @@ local D = ns.defaults
 D.callOn = false              -- the Call of the ... button
 D.callTotemic = false         -- the Totemic Call button
 D.callRecall = false          -- the Totemic Recall button
-D.callSide = "start"          -- "start": before the first totem, "end": after the last place
 D.callChoice = 0              -- which Call spell the button casts: a spell id, 0 = the first one you know
+D.callShow = "always"         -- "always", or "bar": only while the totem bar is up (a totem is out)
+D.callScale = 100             -- button size, % of the totem icons
+D.callAnchor = "bar"          -- "bar": beside the totem bar, "free": a place of their own on the screen
+D.callSide = "start"          -- of the bar: "start" (before the totems: left / above), "end" (after them), or left / right / top / bottom
+D.callAlign = "start"         -- along that side: start / center / end
+D.callOffX, D.callOffY = 0, 0 -- a nudge from there
+D.callPoint, D.callRelPoint, D.callX, D.callY = "CENTER", "CENTER", 0, -200   -- the place of their own
 
 -- the three Call spells (client ids; levels 20 / 30 / 40) and the two single ones
 local CALLS = {
@@ -102,22 +109,54 @@ end
 
 -- ---------------------------------------------------------------- where it sits
 
--- the totem bar's far end is where a new totem lands: the buttons start after all the places (like the buff icons)
-local function auxOnEnd(which)
-	if not (db.shieldOn or db.weaponOn) then return false end
-	if ns.auxMode and ns.auxMode() ~= "bar" then return false end
-	local side = ns.auxSide and ns.auxSide()
-	if db.vertical then return (which == "start" and side == "top") or (which == "end" and side == "bottom") end
-	return (which == "start" and side == "left") or (which == "end" and side == "right")
+local function clamp(v, lo, hi, def)
+	if type(v) ~= "number" or v ~= v then return def end
+	if v < lo then return lo elseif v > hi then return hi end
+	return v
 end
 
--- the end that is used: your choice, unless the buff icons are on that end (then the other one), and why
+local function buttonSize() return math.max(16, math.floor(db.size * clamp(db.callScale, 50, 150, 100) / 100 + 0.5)) end
+
+-- "bar" or "free" (a damaged value counts as the bar)
+local function mode() return db.callAnchor == "free" and "free" or "bar" end
+ns.callMode = mode
+
+local OPPOSITE = { left = "right", right = "left", top = "bottom", bottom = "top" }
+
+-- the side you asked for, as left / right / top / bottom ("start" and "end" are before / after the totems)
+local function sideWanted()
+	local sd = db.callSide
+	if sd == "left" or sd == "right" or sd == "top" or sd == "bottom" then return sd end
+	if sd == "end" then return db.vertical and "bottom" or "right" end
+	return db.vertical and "top" or "left"
+end
+
+-- the buff icons are on that side of the bar: the buttons would sit on them
+local function auxThere(side)
+	if not (db.shieldOn or db.weaponOn) then return false end
+	if ns.auxMode and ns.auxMode() ~= "bar" then return false end
+	return ns.auxSide and ns.auxSide() == side
+end
+
+-- the side that is used: the one you asked for, unless the buff icons are there (then the opposite one), and whether it moved
 local function sideNow()
-	local want = db.callSide == "end" and "end" or "start"
-	if auxOnEnd(want) then return want == "end" and "start" or "end", true end
+	local want = sideWanted()
+	if auxThere(want) then return OPPOSITE[want], true end
 	return want, false
 end
 ns.callSideNow = sideNow
+
+-- is the totem bar up (a totem out, or the settings open to look at it)?
+local function barUp() return (ns.barUp and ns.barUp()) or ns.optionsOpen == true end
+
+-- are the buttons on screen? all the time, or only while the bar is up (a settings page being open always shows them)
+local function visibleNow()
+	if db.callShow == "bar" then return barUp() end
+	return true
+end
+
+-- drag the buttons around: only in their own place, with the frames unlocked (a press must not cast then)
+local function dragging() return mode() == "free" and db.locked == false end
 
 -- ---------------------------------------------------------------- the buttons
 
@@ -155,6 +194,9 @@ local function newButton(kind, index)
 	hl:SetVertexColor(1, 1, 1, 0.18)
 	b:SetScript("OnEnter", guard("call tooltip", tooltipOf))
 	b:SetScript("OnLeave", GameTooltip_Hide)
+	b:RegisterForDrag("LeftButton")
+	b:SetScript("OnDragStart", function() ns.callStartMove() end)
+	b:SetScript("OnDragStop", function() ns.callStopMove() end)
 	b:EnableMouse(false)
 	b:Hide()
 	return b
@@ -241,11 +283,15 @@ local ARROW_AT = {   -- the arrow's own point, the button's point, and how far t
 
 local function placeArrow()
 	local arrow, cb = S.arrow, S.buttons.call
-	local at = ARROW_AT[flyDir()]
+	local dir = flyDir()
+	S.arrowDir = dir
+	local at = ARROW_AT[dir]
 	arrow:ClearAllPoints()
 	arrow:SetPoint(at[1], cb, at[2], 0, 0)
 	pcall(arrow.tex.SetRotation, arrow.tex, at[3])
 end
+
+ns.callPlaceArrow = placeArrow
 
 local function openFlyout()
 	if InCombatLockdown() or not S.choices then return end
@@ -255,7 +301,7 @@ local function openFlyout()
 	if #others == 0 then return end
 	if not S.flyout then S.flyout = newFlyout() end
 	local f, call = S.flyout, S.buttons.call
-	local s, gap = db.size, db.spacing
+	local s, gap = buttonSize(), db.spacing
 	local vertical = db.vertical and true or false
 	local dir = flyDir()
 	placeArrow()                                     -- the bar may have been dragged to the other half of the screen
@@ -317,6 +363,8 @@ local function ensure()
 	if InCombatLockdown() or not ns.bar then return false end
 	local g = CreateFrame("Frame", "ShamanKitCalls", UIParent)
 	g:SetSize(1, 1)
+	g:SetMovable(true)
+	g:SetClampedToScreen(true)
 	S.group = g
 	S.buttons.call = newButton("call", 1)
 	S.buttons.totemic = newButton("totemic", 2)
@@ -334,7 +382,44 @@ local function arm(b, name)
 	b:SetAttribute("spell1", name)
 end
 
--- the whole pass: which buttons, what they cast, where they sit
+-- moving the group by hand (its own place, frames unlocked): out of combat only, like the bar; a drag that really started
+-- is finished and saved, one that never did saves nothing, and a fight that begins mid-drag finishes it when it ends
+local moving = false
+function ns.callStartMove()
+	if dragging() and not InCombatLockdown() and S.group then
+		S.group:StartMoving()
+		moving = true
+	end
+end
+local function finishMove()
+	moving = false
+	S.group:StopMovingOrSizing()
+	local p, _, rp, x, y = S.group:GetPoint()
+	db.callPoint, db.callRelPoint, db.callX, db.callY = p, rp, x, y
+end
+function ns.callStopMove()
+	if not moving or InCombatLockdown() then return end   -- finished by PLAYER_REGEN_ENABLED
+	finishMove()
+end
+
+-- back to the usual spot
+function ns.callResetPlace()
+	local d = ns.defaults
+	db.callSide, db.callAlign, db.callOffX, db.callOffY = d.callSide, d.callAlign, d.callOffX, d.callOffY
+	db.callPoint, db.callRelPoint, db.callX, db.callY = d.callPoint, d.callRelPoint, d.callX, d.callY
+	ns.callApply()
+end
+
+-- everything that decides what is drawn: when none of it changed, a pass has nothing to do
+local function signature(kinds, side)
+	local parts = { tostring(db.callShow), tostring(db.callScale), tostring(db.callAnchor), tostring(db.callSide), tostring(db.callAlign),
+		tostring(db.callOffX), tostring(db.callOffY), tostring(db.callPoint), tostring(db.callRelPoint), tostring(db.callX), tostring(db.callY),
+		tostring(db.size), tostring(db.spacing), tostring(db.vertical), tostring(db.locked), tostring(side), tostring(visibleNow()) }
+	for _, k in ipairs(kinds) do parts[#parts + 1] = k[1] .. ":" .. k[2].id .. ":" .. tostring(spellName(k[2].id, k[2].label)) end
+	return table.concat(parts, "|")
+end
+
+-- the whole pass: which buttons, what they cast, how big, where they sit, whether they are on screen
 local function apply()
 	if not db then return end
 	if InCombatLockdown() then S.pending = true return end
@@ -348,8 +433,17 @@ local function apply()
 	if db.callTotemic and known(TOTEMIC.id) then kinds[#kinds + 1] = { "totemic", TOTEMIC } end
 	if db.callRecall and known(RECALL.id) then kinds[#kinds + 1] = { "recall", RECALL } end
 
-	local s, gap = db.size, db.spacing
+	local side, moved = sideNow()
+	if mode() == "free" then moved = false end         -- no bar to sit beside: nothing to get out of the way of
+	S.side, S.sideMoved = side, moved
+	local sig = signature(kinds, side) .. "|" .. #S.choices
+	if sig == S.sig then ns.callPaintCooldowns() return end
+	S.sig = sig
+
+	local s, gap = buttonSize(), clamp(db.spacing, 0, 24, 4)
 	local vertical = db.vertical and true or false
+	local show = visibleNow()
+	local drag = dragging()
 	local on = {}
 	for i, k in ipairs(kinds) do
 		local kind, sp = k[1], k[2]
@@ -363,8 +457,8 @@ local function apply()
 		b:ClearAllPoints()
 		local off = (i - 1) * (s + gap)
 		if vertical then b:SetPoint("TOPLEFT", S.group, "TOPLEFT", 0, -off) else b:SetPoint("TOPLEFT", S.group, "TOPLEFT", off, 0) end
-		arm(b, name)
-		b:EnableMouse(true)
+		arm(b, (not drag) and name or nil)                -- a press that starts a drag must not cast
+		b:EnableMouse(show)
 		b:Show()
 	end
 	for kind, b in pairs(S.buttons) do
@@ -378,31 +472,40 @@ local function apply()
 	S.shown = {}
 	for _, k in ipairs(kinds) do S.shown[#S.shown + 1] = k[1] end
 
-	-- the group: as long as the buttons, sitting at one end of the totem bar
+	-- the group: as long as the buttons
 	local n = #kinds
 	local g = S.group
 	local long = math.max(n, 1) * s + math.max(n - 1, 0) * gap
 	if vertical then g:SetSize(s, long) else g:SetSize(long, s) end
-	local side, moved = sideNow()
-	S.side, S.sideMoved = side, moved
-	local full = MAX_SLOTS * s + (MAX_SLOTS - 1) * gap
 	g:ClearAllPoints()
-	local bar = ns.bar
-	if vertical then
-		if side == "start" then g:SetPoint("BOTTOMLEFT", bar, "TOPLEFT", 0, OUT_GAP)
-		else g:SetPoint("TOPLEFT", bar, "TOPLEFT", 0, -(full + OUT_GAP)) end
+	if mode() == "free" then
+		g:SetPoint(db.callPoint or "CENTER", UIParent, db.callRelPoint or "CENTER", clamp(db.callX, -3000, 3000, 0), clamp(db.callY, -3000, 3000, -200))
 	else
-		if side == "start" then g:SetPoint("TOPRIGHT", bar, "TOPLEFT", -OUT_GAP, 0)
-		else g:SetPoint("TOPLEFT", bar, "TOPLEFT", full + OUT_GAP, 0) end
+		local align = db.callAlign
+		if align ~= "center" and align ~= "end" then align = "start" end
+		local pair = ns.sidePoints[side][align]
+		local edge = ns.edgeGap(side, "bar")
+		local x = side == "left" and -edge or (side == "right" and edge or 0)
+		local y = side == "top" and edge or (side == "bottom" and -edge or 0)
+		local rel = pair[2]
+		-- past the end of the bar, where a new totem lands: after all the places, not after the ones showing
+		local far = (not vertical and side == "right" and "right") or (vertical and side == "bottom" and "bottom")
+		if far then
+			rel = ns.farRel[far][align]
+			local full = MAX_SLOTS * db.size + (MAX_SLOTS - 1) * db.spacing
+			if far == "right" then x = x + full else y = y - full end
+		end
+		g:SetPoint(pair[1], ns.bar, rel, x + clamp(db.callOffX, -300, 300, 0), y + clamp(db.callOffY, -300, 300, 0))
 	end
-	g:SetShown(n > 0)
+	g:SetShown(n > 0 and show)
 
 	-- the arrow: only on the Call button, and only when there is something to choose
 	local arrow, cb = S.arrow, S.buttons.call
 	if on.call and #S.choices > 1 then
 		local aw = math.max(12, math.floor(s * 0.4))
 		arrow:SetSize(aw, aw)
-		placeArrow()
+		S.arrowDir = nil
+		ns.callPlaceArrow()
 		arrow:Show()
 	else
 		arrow:Hide()
@@ -464,6 +567,7 @@ local function onEvent(_, event)
 	elseif event == "PLAYER_REGEN_DISABLED" then
 		closeFlyout()                                  -- hiding our own plain frame is fine
 	elseif event == "PLAYER_REGEN_ENABLED" then
+		if moving then finishMove() end
 		schedule(true, true)
 	else
 		schedule(true, true)
@@ -495,6 +599,8 @@ function ns.callInfo()
 	local call = chosenCall()
 	out[#out + 1] = ("Call button casts: %s"):format(call and call.label or "nothing yet")
 	local shown = S.shown and #S.shown > 0 and table.concat(S.shown, ", ") or "none"
-	out[#out + 1] = ("buttons on screen: %s%s"):format(shown, S.sideMoved and " (on the other end: the buff icons are on yours)" or "")
+	out[#out + 1] = ("buttons on screen: %s%s"):format(shown, S.sideMoved and " (on the opposite side: the buff icons are on yours)" or "")
+	out[#out + 1] = ("placed: %s, shown %s, %d%% size"):format(mode() == "free" and "in their own place" or ("beside the totem bar (" .. tostring(S.side) .. ")"),
+		db.callShow == "bar" and "only while a totem is out" or "all the time", clamp(db.callScale, 50, 150, 100))
 	return out
 end

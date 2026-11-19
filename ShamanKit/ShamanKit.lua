@@ -892,6 +892,7 @@ local function updateShown()
 	-- restricted in combat (touching it then is what raises the game's "action blocked" popup). When no totem is
 	-- out, everything on it is hidden, so an empty bar is simply invisible.
 	ns.refreshHolders()
+	if ns.callApply then ns.callApply() end    -- the Call spell buttons may follow the bar (only while a totem is out)
 end
 
 local function refreshAll()
@@ -1323,7 +1324,8 @@ local FAR_REL = {
 }
 
 -- room next to the bar taken by the range bars / the yards text, so the icons don't sit on them
-local function edgeGap(side, mode)
+local edgeGap
+function edgeGap(side, mode)
 	local barOrText = mode == "bar" and ((not db.vertical and side == "bottom") or (db.vertical and side == "right"))
 	if not barOrText then return 6 end
 	local mode = distMode()
@@ -1331,6 +1333,8 @@ local function edgeGap(side, mode)
 	if mode == "yards" then return db.vertical and 52 or 18 end
 	return 6
 end
+ns.sidePoints, ns.farRel, ns.edgeGap = SIDE_POINTS, FAR_REL, edgeGap    -- the Call spell buttons (Calls.lua) sit the same way
+function ns.barUp() return bar and (bar.anyShown or previewing) and true or false end
 
 applyAux = function()
 	if not aux then return end

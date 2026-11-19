@@ -1465,19 +1465,183 @@ do
 	db.callSide = "end"; ns.callApply()
 	check(S.group.anchor[1] == "TOPLEFT" and S.group.anchor[5] == -(full + 6), "calls: vertical bar, after: below the places")
 	db.vertical = false; db.callSide = "start"; ns.callApply()
-	-- the buff icons on the same end: the buttons take the other one
+	-- the buff icons on the same side: the buttons take the opposite one
 	db.shieldOn = true; db.auxAnchor = "bar"; db.auxSide = "left"
 	ns.callApply()
-	check(S.side == "end" and S.sideMoved == true and S.group.anchor[1] == "TOPLEFT", "calls: buff icons at the start: the buttons go to the end")
+	check(S.side == "right" and S.sideMoved == true and S.group.anchor[1] == "TOPLEFT", "calls: buff icons on the left: the buttons go to the right")
 	db.callSide = "end"; db.auxSide = "right"; ns.callApply()
-	check(S.side == "start" and S.sideMoved == true, "calls: buff icons at the end: the buttons go to the start")
+	check(S.side == "left" and S.sideMoved == true, "calls: buff icons on the right: the buttons go to the left")
 	db.shieldOn = false; db.weaponOn = false; ns.callApply()
-	check(S.side == "end" and not S.sideMoved, "calls: both buff icons off: nothing in the way")
+	check(S.side == "right" and not S.sideMoved, "calls: both buff icons off: nothing in the way")
 	db.shieldOn = true; db.auxAnchor = "player"; ns.callApply()
-	check(S.side == "end" and not S.sideMoved, "calls: buff icons on the player frame: nothing in the way")
+	check(S.side == "right" and not S.sideMoved, "calls: buff icons on the player frame: nothing in the way")
 	db.auxAnchor = "bar"; db.auxSide = "bottom"; ns.callApply()
-	check(S.side == "end" and not S.sideMoved, "calls: buff icons under the bar: nothing in the way")
+	check(S.side == "right" and not S.sideMoved, "calls: buff icons under the bar, buttons on the right: nothing in the way")
+	db.callSide = "bottom"; ns.callApply()
+	check(S.side == "top" and S.sideMoved, "calls: buff icons under the bar, buttons asked for below: they go above")
 	db.callSide = "start"; db.auxSide = "auto"; ns.callApply()
+
+	-- size: a share of the totem icons, never under 16 px
+	db.shieldOn = false; db.weaponOn = false; db.callSide = "start"; db.callAlign = "start"
+	db.callOn = true; db.callTotemic = true; db.callRecall = true
+	db.callScale = 150; ns.callApply()
+	check(b1.w == 54 and b3.w == 54 and S.group.w == 3 * 54 + 2 * 4, "calls size: 150% of 36 is 54 px, the group follows")
+	check(b2.anchor[4] == 58, "calls size: and the buttons are spaced by the new size")
+	db.callScale = 50; ns.callApply()
+	check(b1.w == 18, "calls size: 50% is 18 px")
+	db.size = 24; ns.callApply()
+	check(b1.w == 16, "calls size: never under 16 px")
+	db.size = 36; db.callScale = "big"; ns.callApply()
+	check(b1.w == 36, "calls size: a damaged value counts as 100%")
+	db.callScale = 150; ns.callApply()
+	S.arrow.scripts.OnClick(S.arrow)
+	check(fly.items[1].w == 54, "calls size: the pick list's buttons follow too")
+	ns.callCloseFlyout()
+	db.callScale = 100; ns.callApply()
+
+	-- the side and the place along it (a horizontal bar; the 'bottom' room is the range bar's)
+	local bar2 = _G.ShamanKitBar
+	local function anchorIs(pt, rel, relPt, x, y, why)
+		local a = S.group.anchor
+		check(a[1] == pt and a[2] == rel and a[3] == relPt and a[4] == x and a[5] == y,
+			("calls place: %s (got %s %s %s %s)"):format(why, tostring(a[1]), tostring(a[3]), tostring(a[4]), tostring(a[5])))
+	end
+	local function at(side, align) db.callSide, db.callAlign = side, align; ns.callApply() end
+	at("left", "start");   anchorIs("TOPRIGHT", bar2, "TOPLEFT", -6, 0, "left, start")
+	at("left", "center");  anchorIs("RIGHT", bar2, "LEFT", -6, 0, "left, middle")
+	at("left", "end");     anchorIs("BOTTOMRIGHT", bar2, "BOTTOMLEFT", -6, 0, "left, end")
+	at("top", "start");    anchorIs("BOTTOMLEFT", bar2, "TOPLEFT", 0, 6, "above, start")
+	at("top", "center");   anchorIs("BOTTOM", bar2, "TOP", 0, 6, "above, middle")
+	at("top", "end");      anchorIs("BOTTOMRIGHT", bar2, "TOPRIGHT", 0, 6, "above, end")
+	at("bottom", "start"); anchorIs("TOPLEFT", bar2, "BOTTOMLEFT", 0, -15, "below, start (room for the range bar)")
+	at("bottom", "end");   anchorIs("TOPRIGHT", bar2, "BOTTOMRIGHT", 0, -15, "below, end")
+	at("right", "start");  anchorIs("TOPLEFT", bar2, "TOPLEFT", full + 6, 0, "right, start: past all four places")
+	at("right", "center"); anchorIs("LEFT", bar2, "LEFT", full + 6, 0, "right, middle")
+	at("right", "end");    anchorIs("BOTTOMLEFT", bar2, "BOTTOMLEFT", full + 6, 0, "right, end")
+	db.callOffX, db.callOffY = 10, -4
+	at("left", "start");   anchorIs("TOPRIGHT", bar2, "TOPLEFT", 4, -4, "a nudge moves it from there")
+	db.callOffX, db.callOffY = "x", 0/0; ns.callApply()
+	anchorIs("TOPRIGHT", bar2, "TOPLEFT", -6, 0, "damaged nudges count as none")
+	db.callOffX, db.callOffY = 0, 0
+	at("sideways", "diagonal"); anchorIs("TOPRIGHT", bar2, "TOPLEFT", -6, 0, "a damaged side is 'before the totems', a damaged align is the start")
+	at("end", "start");    anchorIs("TOPLEFT", bar2, "TOPLEFT", full + 6, 0, "the old 'end' is past the last place")
+	db.vertical = true
+	at("start", "start");  anchorIs("BOTTOMLEFT", bar2, "TOPLEFT", 0, 6, "vertical bar, before the totems: above")
+	at("end", "start");    anchorIs("TOPLEFT", bar2, "TOPLEFT", 0, -(full + 6), "vertical bar, after: below the places")
+	at("left", "start");   anchorIs("TOPRIGHT", bar2, "TOPLEFT", -6, 0, "vertical bar, left")
+	at("right", "start");  anchorIs("TOPLEFT", bar2, "TOPRIGHT", 15, 0, "vertical bar, right (room for the range bar)")
+	check(b2.anchor[5] == -40 and b2.anchor[4] == 0, "calls place: a vertical bar stacks the buttons")
+	db.vertical = false
+	at("start", "start")
+
+	-- showing: all the time, or only while a totem is out
+	local function pair() return S.group.shown, b1.mouse end
+	db.callShow = "always"; ns.callApply()
+	local sh, mo = pair()
+	check(sh == true and mo == true, "calls show: 'all the time': on screen with no totem out")
+	db.callShow = "bar"; ns.callApply()
+	sh, mo = pair()
+	check(sh == false and mo == false, "calls show: 'only while a totem is out', none out: hidden and nothing takes a click")
+	totems[2] = { name = "Strength of Earth Totem IV", start = t, dur = 300, icon = 99 }
+	fire("PLAYER_TOTEM_UPDATE", 2)
+	sh, mo = pair()
+	check(sh == true and mo == true, "calls show: a totem comes out: the buttons appear")
+	totems[2] = nil
+	fire("PLAYER_TOTEM_UPDATE", 2)
+	sh, mo = pair()
+	check(sh == false and mo == false, "calls show: it is gone: the buttons go too")
+	ns.optionsOpen = true; ns.updatePreview()
+	check(S.group.shown == true, "calls show: a settings page open shows them (so you can set them up)")
+	ns.optionsOpen = false; ns.updatePreview()
+	check(S.group.shown == false, "calls show: ...and closing it hides them again")
+	-- a totem comes out in a fight: nothing is touched until it is over
+	local gw = 0
+	for _, f in ipairs({ S.group }) do local o = f.SetShown; rawset(f, "SetShown", function(self, v) gw = gw + 1; return o(self, v) end) end
+	inCombat = true
+	totems[2] = { name = "Strength of Earth Totem IV", start = t, dur = 300, icon = 99 }
+	local okf = pcall(fire, "PLAYER_TOTEM_UPDATE", 2)
+	check(okf and gw == 0 and S.group.shown == false, "calls show fight: a totem out in a fight: no error, the group is not touched")
+	inCombat = false
+	cfire("PLAYER_REGEN_ENABLED"); fire("PLAYER_REGEN_ENABLED"); runTimers()
+	check(S.group.shown == true, "calls show fight: after it the buttons appear")
+	inCombat = true
+	totems[2] = nil
+	pcall(fire, "PLAYER_TOTEM_UPDATE", 2)
+	check(S.group.shown == true and gw == 1, "calls show fight: the totem expiring in a fight: the buttons stay until it is over")
+	inCombat = false
+	cfire("PLAYER_REGEN_ENABLED"); fire("PLAYER_REGEN_ENABLED"); runTimers()
+	check(S.group.shown == false, "calls show fight: ...then they go")
+	rawset(S.group, "SetShown", nil)
+	db.callShow = "always"; ns.callApply()
+	check(S.group.shown == true, "calls show: back to all the time")
+	db.callShow = "whenever"; ns.callApply()
+	check(S.group.shown == true, "calls show: a damaged value counts as all the time")
+	db.callShow = "always"
+
+	-- a pass with nothing changed writes nothing
+	ns.callApply()
+	local clears = 0
+	local oc = S.group.ClearAllPoints
+	rawset(S.group, "ClearAllPoints", function(self) clears = clears + 1; return oc(self) end)
+	local attrWrites = 0
+	for _, b in ipairs({ b1, b2, b3 }) do local o = b.SetAttribute; rawset(b, "SetAttribute", function(self, k, v) attrWrites = attrWrites + 1; return o(self, k, v) end) end
+	for _ = 1, 20 do ns.callApply() end
+	check(clears == 0 and attrWrites == 0, "calls: a pass with nothing changed moves and arms nothing (" .. clears .. ", " .. attrWrites .. ")")
+	db.callOffX = 3; ns.callApply()
+	check(clears == 1, "calls: ...and one setting changed does it once")
+	db.callOffX = 0; ns.callApply()
+	rawset(S.group, "ClearAllPoints", nil)
+	for _, b in ipairs({ b1, b2, b3 }) do rawset(b, "SetAttribute", nil) end
+
+	-- a place of their own
+	db.callAnchor = "free"; ns.callApply()
+	anchorIs("CENTER", UIParent, "CENTER", 0, -200, "own place: the usual spot to begin with")
+	db.callPoint, db.callRelPoint, db.callX, db.callY = "TOP", "TOP", 120, -80; ns.callApply()
+	anchorIs("TOP", UIParent, "TOP", 120, -80, "own place: where you put it")
+	db.callX, db.callY = "far", 0/0; ns.callApply()
+	anchorIs("TOP", UIParent, "TOP", 0, -200, "own place: damaged numbers fall back")
+	db.callX, db.callY = 120, -80
+	db.callSide = "right"; db.shieldOn = true; db.auxAnchor = "bar"; db.auxSide = "right"; ns.callApply()
+	check(S.group.anchor[2] == UIParent and not S.sideMoved, "calls: own place ignores the side and the buff icons")
+	db.shieldOn = false; db.auxSide = "auto"; db.callSide = "start"
+	-- dragging it: unlocked, in its own place, out of a fight
+	ns.callApply()
+	local started, stopped = 0, 0
+	local oSM, oSS = S.group.StartMoving, S.group.StopMovingOrSizing
+	rawset(S.group, "StartMoving", function() started = started + 1 end)
+	rawset(S.group, "StopMovingOrSizing", function() stopped = stopped + 1 end)
+	b1.scripts.OnDragStart(b1)
+	check(started == 0, "calls drag: locked: no drag")
+	db.locked = false; ns.callApply()
+	check(b1.attrs.spell1 == nil and b1.attrs.type1 == nil and b1.mouse == true, "calls drag: unlocked in its own place: a press does not cast, the buttons can be grabbed")
+	b1.scripts.OnDragStart(b1); b1.scripts.OnDragStop(b1)
+	check(started == 1 and stopped == 1 and db.callPoint == "CENTER" and db.callX == 10 and db.callY == 20, "calls drag: moved and saved where it was dropped")
+	b1.scripts.OnDragStop(b1)
+	check(stopped == 1, "calls drag: a stop with no start saves nothing")
+	inCombat = true
+	b1.scripts.OnDragStart(b1)
+	check(started == 1, "calls drag: not in a fight")
+	inCombat = false
+	-- a fight starting mid-drag: finished when it is over
+	b1.scripts.OnDragStart(b1)
+	inCombat = true
+	b1.scripts.OnDragStop(b1)
+	check(started == 2 and stopped == 1, "calls drag: a drag cut off by a fight is not finished in it")
+	inCombat = false; db.callX = 0
+	cfire("PLAYER_REGEN_ENABLED")
+	check(stopped == 2 and db.callX == 10, "calls drag: ...it is finished and saved when the fight ends")
+	db.callAnchor = "weird"; ns.callApply()
+	check(S.group.anchor[2] == bar2 and b1.attrs.spell1 == "Call of the Elements", "calls drag: a damaged 'attach to' counts as the bar: armed again (still unlocked)")
+	db.callAnchor = "bar"; ns.callApply()
+	b1.scripts.OnDragStart(b1)
+	check(started == 2, "calls drag: attached: the buttons do not drag (the bar does)")
+	rawset(S.group, "StartMoving", oSM); rawset(S.group, "StopMovingOrSizing", oSS)
+	db.locked = true; ns.callApply()
+	-- back to the usual spot
+	db.callAnchor = "free"; db.callPoint, db.callX, db.callY, db.callSide, db.callOffX = "TOP", 99, 98, "right", 5; ns.callApply()
+	ns.callResetPlace()
+	check(db.callPoint == "CENTER" and db.callX == 0 and db.callY == -200 and db.callSide == "start" and db.callOffX == 0 and db.callAnchor == "free", "calls: reset puts the place, the side and the nudge back (not the choice of own place)")
+	db.callAnchor = "bar"; ns.callApply()
 
 	-- a fight: none of the secure buttons or their group is touched (the game would refuse and show a popup)
 	local writes = 0
@@ -1544,19 +1708,72 @@ do
 	check(onBox.checked == false, "calls settings: shows off")
 	onBox:SetChecked(true); onBox.scripts.OnClick(onBox)
 	check(db.callOn == true and b1.shown, "calls settings: ticking it puts the button on screen at once")
-	local radios = {}
-	for _, f in ipairs(frames) do if f.value and f.parentFrame == page and (f.value == "start" or f.value == "end") then radios[f.value] = f end end
-	check(radios.start and radios["end"], "calls settings: before / after choices")
-	radios["end"].scripts.OnClick(radios["end"])
-	check(db.callSide == "end" and S.group.anchor[4] == full + 6, "calls settings: 'after the totems' moves the buttons")
-	db.callTotemic = true; db.callRecall = true; db.callChoice = CA; db.callSide = "end"
+	-- the radio groups, in the order the page makes them: show (2), attach (2), side (5), align (3)
+	local rb = {}
+	for _, f in ipairs(frames) do if type(f.value) == "string" and f.parentFrame == page and f.scripts.OnClick then rb[#rb + 1] = f end end
+	check(#rb == 12, "calls settings: twelve radio choices (" .. #rb .. ")")
+	local function pick(i) rb[i].scripts.OnClick(rb[i]) end
+	pick(2)
+	check(db.callShow == "bar", "calls settings: 'only while a totem is out'")
+	pick(1)
+	check(db.callShow == "always", "calls settings: 'all the time'")
+	pick(4)
+	check(db.callAnchor == "free", "calls settings: 'own place'")
+	pick(3)
+	check(db.callAnchor == "bar", "calls settings: 'totem bar'")
+	pick(6); check(db.callSide == "bottom", "calls settings: below")
+	pick(7); check(db.callSide == "top", "calls settings: above")
+	pick(8); check(db.callSide == "left", "calls settings: left")
+	pick(9); check(db.callSide == "right" and S.group.anchor[4] == full + 6, "calls settings: right moves the buttons past the places")
+	pick(5); check(db.callSide == "start", "calls settings: auto")
+	pick(11); check(db.callAlign == "center", "calls settings: middle")
+	pick(12); check(db.callAlign == "end", "calls settings: end")
+	pick(10); check(db.callAlign == "start", "calls settings: start")
+	-- the radios show what is saved (the old values too)
+	db.callSide = "end"; db.vertical = false; page.OnRefresh()
+	check(rb[9].checked == true and rb[5].checked == false, "calls settings: the old 'end' shows as Right")
+	db.vertical = true; page.OnRefresh()
+	check(rb[6].checked == true, "calls settings: ...and as Below on a vertical bar")
+	db.vertical = false; db.callSide = "start"; db.callShow = "bar"; db.callAnchor = "free"; page.OnRefresh()
+	check(rb[5].checked == true and rb[2].checked == true and rb[4].checked == true, "calls settings: they show what is saved")
+	-- own place: the side and the nudge are greyed, the screen position is not
+	check(rb[6].enabled == false and rb[10].enabled == false, "calls settings: own place: side and along-side choices are greyed out")
+	local sl = {}
+	for _, f in ipairs(frames) do if f.kind == "Slider" and f.parentFrame == page then sl[#sl + 1] = f end end
+	check(#sl == 5, "calls settings: five sliders: size, two nudges, two screen positions (" .. #sl .. ")")
+	check(sl[2].enabled == false and sl[3].enabled == false and sl[4].enabled ~= false and sl[5].enabled ~= false, "calls settings: own place: nudges greyed, screen position on")
+	local unlockBox = boxFor("locked")
+	check(unlockBox and unlockBox.enabled ~= false, "calls settings: own place: the unlock box is on")
+	db.callAnchor = "bar"; rb[3].scripts.OnClick(rb[3])
+	check(rb[6].enabled == true and sl[2].enabled == true and sl[4].enabled == false and unlockBox.enabled == false, "calls settings: attached: the reverse")
+	sl[1]:SetValue(70)
+	check(db.callScale == 70 and b1.w == 25, "calls settings: the size slider resizes the buttons (" .. tostring(b1.w) .. ")")
+	sl[2]:SetValue(12); sl[3]:SetValue(-8)
+	check(db.callOffX == 12 and db.callOffY == -8, "calls settings: the nudge sliders")
+	sl[4]:SetValue(300); sl[5]:SetValue(-100)
+	check(db.callX == 300 and db.callY == -100, "calls settings: the own-place sliders")
+	unlockBox:SetChecked(true)
+	rb[4].scripts.OnClick(rb[4]); unlockBox.scripts.OnClick(unlockBox)
+	check(db.locked == false, "calls settings: the unlock box unlocks")
+	unlockBox:SetChecked(false); unlockBox.scripts.OnClick(unlockBox)
+	check(db.locked == true, "calls settings: and locks")
+	local resetBtn
+	for _, f in ipairs(frames) do if f.kind == "Button" and f.text == "Reset button position" and f.parentFrame == page then resetBtn = f end end
+	check(resetBtn ~= nil, "calls settings: a reset button")
+	db.callX = 777; resetBtn.scripts.OnClick(resetBtn)
+	check(db.callX == 0 and db.callY == -200, "calls settings: reset puts the place back")
+	db.callTotemic = true; db.callRecall = true; db.callChoice = CA; db.callSide = "end"; db.callShow = "bar"; db.callScale = 120
+	db.callAnchor = "free"; db.callAlign = "end"; db.callOffX = 9
 	page.OnDefault()
-	check(db.callOn == false and db.callTotemic == false and db.callRecall == false and db.callSide == "start" and db.callChoice == 0, "calls settings: Defaults restores this page's settings")
+	check(db.callOn == false and db.callTotemic == false and db.callRecall == false and db.callSide == "start" and db.callChoice == 0
+		and db.callShow == "always" and db.callScale == 100 and db.callAnchor == "bar" and db.callAlign == "start" and db.callOffX == 0,
+		"calls settings: Defaults restores this page's settings")
 	check(not b1.shown and not b2.shown, "calls settings: ...and the buttons go away")
 	-- status
 	local info = ns.callInfo()
 	local blob = table.concat(info, "\n")
 	check(blob:find("Call of the Elements: you have it") and blob:find("Call of the Spirits: you don't have it") and blob:find("Call button casts: Call of the Elements"), "calls status: what you have and what the button casts")
+	check(blob:find("placed: beside the totem bar %(left%), shown all the time, 100%% size"), "calls status: where they are, when they show, how big (" .. blob:match("placed:[^\n]*") .. ")")
 	local out = {}
 	local pr = print; print = function(...) out[#out + 1] = table.concat({ ... }, " ") end
 	SlashCmdList.SHAMANKIT("status")

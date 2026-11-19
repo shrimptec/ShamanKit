@@ -471,7 +471,7 @@ function ns.buildOptions()
 
 	-- ------------------------------------------------------------ page 5: the Call spell buttons (built in CallOptions.lua)
 	local okk, callsPage = pcall(function()
-		return ns.buildCallsPage and ns.buildCallsPage({ newPage = newPage, checkbox = checkbox, header = header, note = note,
+		return ns.buildCallsPage and ns.buildCallsPage({ newPage = newPage, checkbox = checkbox, slider = slider, header = header, note = note,
 			enable = enable, radioGroup = radioGroup, LEFT = LEFT, RIGHT = RIGHT, COLW = COLW })
 	end)
 	if not okk then print("ShamanKit: the Call spells page could not be built: " .. tostring(callsPage)); callsPage = nil end

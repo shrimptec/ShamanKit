@@ -11,7 +11,8 @@ Small helpers for shamans, for World of Warcraft: Forever, in the default UI sty
   about to run out), or, if you prefer, shows which enchant is on and its time left, like the shield icon (main hand,
   hidden when dead, with no weapon or a fishing pole). The other icon shows your Lightning Shield charges while it is up. They can hang on the totem bar or the player frame (any side, any alignment, nudge and size are settings)
   or sit in a place of their own that you drag.
-- **Call spells**: optional buttons next to the totem bar (before or after the totems): one for Call of the Elements /
+- **Call spells**: optional buttons at the totem bar (any side, any alignment, nudge and size are settings) or in a place of
+  their own that you drag, shown all the time or only while a totem is out: one for Call of the Elements /
   Ancestors / Spirits with a small arrow to pick which, like the default totem bar, plus Totemic Call and Totemic
   Recall. Each is its own option (all off until you switch them on), and each only shows when you know the spell. In a
   fight a click casts as normal, but choosing another Call spell waits until the fight is over.

@@ -2,7 +2,7 @@
 ## Title: ShamanKit
 ## Notes: Shaman helpers: totem timers and range, weapon enchant and Lightning Shield reminders, cure spells that light up. /shamankit
 ## Author: shrimptec
-## Version: 0.15.0
+## Version: 0.16.0
 ## X-Website: https://github.com/shrimptec/ShamanKit
 ## SavedVariables: ShamanKitDB
 ## IconTexture: Interface\Icons\Spell_Nature_StrengthOfEarthTotem02
