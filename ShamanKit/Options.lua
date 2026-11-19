@@ -276,7 +276,7 @@ function ns.buildOptions()
 	-- ------------------------------------------------------------ page 1: the totem bar
 	local main = newPage("Totem bar", "Totem bar",
 		"Your active totems, how long they have left, and whether you are in range of each.",
-		{ "size", "spacing", "vertical", "showTimer", "showRange", "showOut", "tint", "distanceMode", "rangeByBuff", "attach", "attachX", "attachY", "locked" })
+		{ "size", "spacing", "vertical", "showTimer", "showRange", "showOut", "tint", "distanceMode", "rangeByBuff", "buffFollow", "attach", "attachX", "attachY", "locked" })
 	local p1 = main.panel
 
 	header(p1, "Totem icons", LEFT, -88, COLW)
@@ -314,6 +314,13 @@ function ns.buildOptions()
 	reset:SetText("Reset position")
 	reset:SetScript("OnClick", function() ns.resetPosition(); main.refresh() end)
 	note(p1, "Move on screen (top right) drags everything at once.", RIGHT, -240)
+
+	header(p1, "Buff on the icon", RIGHT, -268, COLW)
+	-- ticked = the old way: the icon is lit by position and the buff's own small picture sits on its corner
+	main.add(checkbox(p1, "Small buff picture on the corner, icon not red", "buffFollow", RIGHT, -292,
+		function() return ns.get().buffFollow == false end,
+		function(on) local d = ns.get(); d.buffFollow = not on; d.buffBadge = true end))
+	note(p1, "Unticked: the icon is red until you have the buff.\nTicked: the icon is judged by position, and the\nbuff's picture shows on its corner while you have it.", RIGHT + 28, -318)
 
 	-- advanced: exact nudges while under the player frame, and how the range is judged
 	local offX = main.adv(main.add(slider(p1, "Position left / right (under the player frame)", "attachX", -200, 300, RIGHT, -412)))

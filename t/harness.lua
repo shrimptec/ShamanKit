@@ -3336,11 +3336,22 @@ do
 	check(not S.boxes["8076b"].c.shown and not S.boxes["8076b"].c.enabled, "badges: switched off: gone")
 	db.buffBadge = true; ns.badgeSchedule(); settle()
 	check(S.boxes["8076b"].c.shown == true, "badges: switched on again: back")
-	local nbox = 0
-	for _, f in ipairs(frames) do if (f.settingKey == "buffFollow" or f.settingKey == "buffBadge" or f.value == "corner" or f.value == "follow") and f.parentFrame == savedCat.pages[2] then nbox = nbox + 1 end end
-	check(nbox == 0, "badges: no setting for it on the Totem bar page any more")
-	db.buffBadge = false; db.buffFollow = false; savedCat.pages[2].OnDefault()
-	check(db.buffBadge == false and db.buffFollow == false, "badges: the page's Defaults leave it alone")
+	local bm
+	for _, f in ipairs(frames) do if f.settingKey == "buffFollow" and f.parentFrame == savedCat.pages[2] then bm = f end end
+	check(bm ~= nil, "badges: one tick box on the Totem bar page (small picture on the corner, icon not red)")
+	local nradio = 0
+	for _, f in ipairs(frames) do if (f.value == "corner" or f.value == "follow" or f.value == "none") and f.parentFrame == savedCat.pages[2] then nradio = nradio + 1 end end
+	check(nradio == 0, "badges: no three-way choice")
+	db.buffBadge = true; db.buffFollow = true; bm.refresh()
+	check(not bm.checked, "badges: unticked is the red/bright icon (the default)")
+	bm:SetChecked(true); bm.scripts.OnClick(bm); settle()
+	check(db.buffFollow == false and db.buffBadge == true and bm.checked and S.boxes["8076b"].c.shown, "badges: ticking brings back the corner picture")
+	bm:SetChecked(false); bm.scripts.OnClick(bm); settle()
+	check(db.buffFollow == true and db.buffBadge == true and not bm.checked and not S.boxes["8076b"].c.shown, "badges: unticking goes back to red/bright, the corner picture goes")
+	db.buffFollow = false; savedCat.pages[2].OnDefault()
+	check(db.buffFollow == true and not bm.checked, "badges: the page's Defaults: red/bright")
+	db.buffFollow = false; bm.refresh()
+	check(bm.checked, "badges: the box reads the saved value")
 	db.buffBadge = true   -- the tests below use the corner picture
 	settle()
 
@@ -3605,6 +3616,15 @@ do
 	local function fightAt(x) AURAS_HIDDEN = true; inCombat = true; pos = { y = 0, x = x, map = 1 }; t = t + 1; tick() end
 	local function fightOver() AURAS_HIDDEN = false; inCombat = false end
 	fightAt(27); check(plain(btn(2)) and not waiting(btn(2)), "learn: before anything is learned 27 of 30 is a best guess: in, no ?"); fightOver()
+	-- a walk away changes the learned edge every step: the log keeps one line per 5 s, not one per step
+	do
+		local function nEdge() local n = 0; for _, l in ipairs(ShamanKitLogDB.lines) do if l:find("EDGE learned") then n = n + 1 end end return n end
+		local e0 = nEdge()
+		auras["Strength of Earth"] = { spellId = 8076 }
+		for x = 1, 29, 2 do pos = { y = 0, x = x, map = 1 }; t = t + 0.4; tick() end
+		local ne = nEdge() - e0
+		check(ne >= 1 and ne <= 3, "learn: a walk of about 6 s logs a few EDGE lines, not one per step (" .. ne .. ")")
+	end
 	hold(31, true)
 	hold(32, false)
 	check(ns.barState(2).lo == 31 and ns.barState(2).hi == 32, "learn: on at 31, off at 32 (" .. tostring(ns.barState(2).lo) .. "," .. tostring(ns.barState(2).hi) .. ")")
@@ -4182,13 +4202,13 @@ do
 	ShamanKitDB = { size = 50, reserve = {} }
 	fire("ADDON_LOADED", "ShamanKit")
 	check(ShamanKitDB.size == 50 and ShamanKitDB.spacing == 6 and next(ShamanKitDB.reserve) == nil, "existing install: saved values stay, missing ones are filled")
-	-- 0.22.1: the red/bright icon in a fight is always on, whatever an older install saved
+	-- 0.24: the game-drawn buff is always on; buffFollow picks red/bright (default) or the corner picture
 	ShamanKitDB = { buffBadge = false, buffFollow = false }
 	fire("ADDON_LOADED", "ShamanKit")
-	check(ShamanKitDB.buffBadge == true and ShamanKitDB.buffFollow == true, "old install with it off: on now")
+	check(ShamanKitDB.buffBadge == true and ShamanKitDB.buffFollow == false, "old install with it off: the game-drawn buff is on, corner picture kept as saved")
 	ShamanKitDB = { buffBadge = true, buffFollow = false }
 	fire("ADDON_LOADED", "ShamanKit")
-	check(ShamanKitDB.buffBadge == true and ShamanKitDB.buffFollow == true, "old corner-picture install: follow mode now")
+	check(ShamanKitDB.buffBadge == true and ShamanKitDB.buffFollow == false, "corner-picture choice survives a reload")
 	ShamanKitDB = nil
 	fire("ADDON_LOADED", "ShamanKit")
 	check(ShamanKitDB.buffBadge == true and ShamanKitDB.buffFollow == true, "fresh install: on")

@@ -19,7 +19,7 @@ local db
 
 local D = ns.defaults
 D.buffBadge = true             -- always on (the game draws the totem's buff over its icon)
-D.buffFollow = true            -- always on: the totem icon follows the buff, bright with it, red without it
+D.buffFollow = true            -- the totem icon follows the buff, bright with it, red without it (off: the old way, icon lit by position and the buff's picture on its corner)
 -- (db.buffIds is not a default: it is learned, one set of spell ids per buff name)
 
 local SLOTS = 4

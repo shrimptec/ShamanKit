@@ -50,7 +50,7 @@ function ns.migrate(d)
 	if d.showRange == false and d.showOut == nil then d.showOut = false end   -- the old single switch hid both marks
 	if d.auxAnchor == nil then d.auxAnchor = (d.auxAttached == false) and "free" or "bar" end   -- "attached or not" became bar / player frame / own place
 	d.auxAttached = nil
-	d.buffFollow, d.buffBadge = true, true   -- 0.22: the red/bright icon in a fight is always on (no setting, no corner picture)
+	d.buffBadge = true   -- 0.24: the game-drawn buff is always on; buffFollow (default true) picks red/bright icon or corner picture
 end
 
 local isSecret = issecretvalue or function() return false end
@@ -463,8 +463,9 @@ local function learnEdge(s, dist, buff)
 	local key = tostring(s.lo and math.floor(s.lo)) .. "/" .. tostring(s.hi and math.floor(s.hi))
 	if key ~= s.edgeKey then
 		s.edgeKey = key
-		dbg("EDGE learned for %s: buff on out to %s yd, off from %s yd (radius %s)", tostring(s.name),
-			s.lo and ("%.1f"):format(s.lo) or "?", s.hi and ("%.1f"):format(s.hi) or "?", tostring(s.range))
+		-- the ring holds 80 lines: a walk away from a totem changes this every step, so one line per 5 s is enough
+		if not s.edgeLogAt or t - s.edgeLogAt >= 5 then s.edgeLogAt = t; dbg("EDGE learned for %s: buff on out to %s yd, off from %s yd (radius %s)", tostring(s.name),
+			s.lo and ("%.1f"):format(s.lo) or "?", s.hi and ("%.1f"):format(s.hi) or "?", tostring(s.range)) end
 	end
 end
 
