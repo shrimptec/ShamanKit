@@ -22,6 +22,7 @@ ns.defaults = {
 	showRange = true,       -- green check when in range
 	showOut = true,         -- red cross when out of range
 	rememberLast = true,    -- a placeholder shows the last totem that was out in that place (a chosen totem always wins)
+	leftCast = true,        -- left-click a place on the bar to cast the totem it shows (locked bar only)
 	distanceMode = "bar",   -- how far you are from each totem: "bar" (room left in its radius), "yards" (exact number) or "off"
 	tint = true,
 	locked = true,
@@ -155,15 +156,18 @@ local function iconForName(name)
 	end
 end
 
--- db.hold.last[slot] = icon of the last totem seen in that place; db.hold.choice[slot] = spell id of the totem the
--- player locked that place's placeholder to. Always plain tables with plain values.
+-- db.hold.last[slot] = icon of the last totem seen in that place; db.hold.lastSpell[slot] = the spell id of that totem
+-- (for the left-click cast); db.hold.choice[slot] = spell id of the totem the player locked that place's placeholder
+-- to. Always plain tables with plain values.
 local function fixHold()
 	local h = db.hold
 	if type(h) ~= "table" then h = {}; db.hold = h end
 	if type(h.last) ~= "table" then h.last = {} end
 	if type(h.choice) ~= "table" then h.choice = {} end
+	if type(h.lastSpell) ~= "table" then h.lastSpell = {} end
 	for slot = 1, MAX_SLOTS do
 		local l, c = h.last[slot], h.choice[slot]
+		if h.lastSpell[slot] ~= nil and type(h.lastSpell[slot]) ~= "number" then h.lastSpell[slot] = nil end
 		if l ~= nil and not ((type(l) == "number" or type(l) == "string") and not isSecret(l)) then h.last[slot] = nil end
 		if c ~= nil and type(c) ~= "number" then h.choice[slot] = nil end
 	end
@@ -190,8 +194,19 @@ local function remember(slot, icon, name)
 	if icon ~= nil and not isSecret(icon) and (type(icon) == "number" or type(icon) == "string") then tex = icon
 	else tex = iconForName(name) end
 	if tex ~= nil and not isSecret(tex) and (type(tex) == "number" or type(tex) == "string") then
-		local last = fixHold().last
-		if last[slot] ~= tex then last[slot] = tex end
+		local h = fixHold()
+		local last = h.last
+		if last[slot] ~= tex or h.lastSpell[slot] == nil then
+			last[slot] = tex
+			-- which spell puts that totem down: the catalogue entry whose picture it is. A totem the catalogue doesn't
+			-- know leaves nothing here, so a click never casts the wrong (older) totem.
+			local id
+			for _, entry in ipairs(CATALOGUE[slot] or {}) do
+				local eid = entryId(entry)
+				if eid and spellTexture(eid) == tex then id = eid break end
+			end
+			h.lastSpell[slot] = id
+		end
 	end
 end
 
@@ -255,6 +270,43 @@ end
 
 -- Bookkeeping must never stop a totem from being shown: it runs after the icon is up, and a failure is only logged.
 local rememberSafe = guard("remember", remember)
+
+-- ---- left-click a place to cast the totem it shows
+-- The hit button over each place is a secure button, so the game itself casts: "*type1" = "spell", "*spell1" = the name.
+-- The game lets nothing but its own code change those in combat, so they are set out of combat only (layout() and
+-- applyBarMouse() run this) and simply used in a fight. Off when the bar is unlocked (a left press then moves it).
+local leftApplied = {}
+local function leftEnabled() return db.leftCast ~= false and db.locked ~= false and not previewing end
+
+-- what a click on this place casts: the totem the place's picture shows (the one picked for it, else, if remembering
+-- is on, the last one that was out there), as the spell's name
+local function castNameFor(slot)
+	local h = fixHold()
+	local id = h.choice[slot] or (db.rememberLast ~= false and h.lastSpell[slot]) or nil
+	if not id then return nil end
+	local info = spellInfo(id)
+	local n = info and info.name
+	if type(n) == "string" and n ~= "" and not isSecret(n) then return n end
+end
+ns.castName = castNameFor
+
+local function leftArmed(slot) return leftEnabled() and castNameFor(slot) ~= nil end
+
+local function applyLeftCast()
+	if InCombatLockdown() then return end        -- secure attributes: out of combat only
+	local on = leftEnabled()
+	for slot = 1, MAX_SLOTS do
+		local h = hits[slot]
+		if h then
+			local name = on and castNameFor(slot) or nil
+			if leftApplied[slot] ~= (name or false) then
+				leftApplied[slot] = name or false
+				h:SetAttribute("*type1", name and "spell" or nil)
+				h:SetAttribute("*spell1", name)
+			end
+		end
+	end
+end
 
 -- Where the player is, from every source that is readable right now. Two independent sources so that
 -- a restriction on one (combat, instances) still leaves the other:
@@ -368,6 +420,14 @@ end
 
 local function tooltip(self)
 	GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+	local ph = ns.holder and ns.holder(self.slot)
+	if ph and ph:IsShown() and not buttons[self.slot]:IsShown() then   -- an empty kept place
+		local n = ns.castName and ns.castName(self.slot)
+		GameTooltip:SetText(n or "Empty place")
+		if n and self:GetAttribute("*type1") then GameTooltip:AddLine("Left-click to cast it", 1, 1, 1) end
+		GameTooltip:Show()
+		return
+	end
 	local shown = false
 	if not previewing and GameTooltip.SetTotem then shown = pcall(GameTooltip.SetTotem, GameTooltip, self.slot) end
 	if not shown then GameTooltip:SetText(buttons[self.slot].sampleName or "Totem") end
@@ -451,6 +511,8 @@ local function newHolder(slot)
 	return h
 end
 
+function ns.holder(slot) return holds[slot] end
+
 -- The clickable layer. Right-click dismisses the totem: the game only lets its own secure code do that,
 -- so each slot gets a secure button with the built-in "destroytotem" action (what the default totem bar
 -- uses). Secure buttons can't be created, moved, resized or have their attributes changed in combat,
@@ -533,6 +595,9 @@ local function layout()
 	-- the rest are parked after those: a totem that appears mid-fight lands on its own spot
 	for _, slot in ipairs(want) do if not (buttons[slot]:IsShown() or reserve[slot]) then order[#order + 1] = slot end end
 	local s, gap = db.size, db.spacing
+	applyLeftCast()
+	local anyUp = false
+	for slot = 1, MAX_SLOTS do if buttons[slot]:IsShown() then anyUp = true end end
 	for i, slot in ipairs(order) do
 		local h = hits[slot]
 		sizeButton(buttons[slot])
@@ -545,7 +610,9 @@ local function layout()
 		if db.vertical then y = -off else x = off end
 		h:SetPoint("TOPLEFT", bar, "TOPLEFT", x, y)
 		b:SetPoint("TOPLEFT", bar, "TOPLEFT", x, y)   -- same spot; not anchored to the protected button, so it stays freely showable
-		h:EnableMouse(b:IsShown())   -- no invisible click-blocking squares where there is no totem
+		-- clickable where a totem is out; and over an empty kept place while the bar is up and a click would cast something
+		-- (so it works in a fight too, when the game won't let this change). No invisible click-blocking squares otherwise.
+		h:EnableMouse(b:IsShown() or (reserve[slot] and anyUp and leftArmed(slot)) or false)
 		local ph = holds[slot]
 		ph:ClearAllPoints()
 		ph:SetSize(s, s)
@@ -871,6 +938,7 @@ local function applyBarMouse()
 	if InCombatLockdown() then mousePending = true return end
 	mousePending = false
 	bar:EnableMouse(db.locked == false and not db.attach)
+	applyLeftCast()
 end
 
 local attachPending = false

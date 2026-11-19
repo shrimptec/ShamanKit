@@ -260,7 +260,7 @@ function ns.buildOptions()
 	-- ------------------------------------------------------------ page 2: the totems
 	local totems = newPage("Totems", "Totems",
 		"The order of the totems, keeping a place open while one is down, and what its dim placeholder shows.",
-		{ "rememberLast" })
+		{ "rememberLast", "leftCast" })
 	local p2 = totems.panel
 	header(p2, "Totems, first to last in the bar", LEFT, -78, 580)
 	local COL = { icon = 16, label = 50, up = 116, down = 138, keep = 184, pick = 232 }
@@ -359,6 +359,8 @@ function ns.buildOptions()
 	header(p2, "Placeholders", LEFT, -314, 580)
 	totems.add(checkbox(p2, "Placeholder shows the last totem used", "rememberLast", LEFT, -340))
 	note(p2, "A totem picked in the list above always wins.", LEFT + 28, -368)
+	totems.add(checkbox(p2, "Left-click a place to cast its totem", "leftCast", LEFT, -396))
+	note(p2, "Casts the totem the place shows (the dim one, or the one that is out), also in a fight.\nLocked bar only: when it is unlocked, dragging moves it instead.", LEFT + 28, -424)
 	totems.after[#totems.after + 1] = refreshRows
 	totems.onDefault = function()
 		local db = ns.get()

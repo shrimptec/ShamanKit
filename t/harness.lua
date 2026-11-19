@@ -25,6 +25,7 @@ local function mock(kind)
 			return function() error("ADDON_ACTION_BLOCKED: " .. k .. " on a protected frame in combat") end
 		end
 		if k == "SetAttribute" then return function(self, n, v) self.attrs[n] = v end end
+		if k == "GetAttribute" then return function(self, n) return self.attrs[n] end end
 		if k == "RegisterEvent" or k == "RegisterUnitEvent" then return function(self, n) REGISTERED[#REGISTERED + 1] = n; self.registered = self.registered or {}; self.registered[n] = true end end
 		if k == "UnregisterEvent" then return function(self, n) if self.registered then self.registered[n] = nil end end end
 		if k == "Show" then return function(self) self.shown = true end end
@@ -850,6 +851,120 @@ do
 end
 
 -- ---- a failure in the bookkeeping (memory of icons, placeholders) must never stop a totem from showing, least of all mid-fight
+-- ---- left-click a place to cast the totem it shows (secure attributes: set out of combat only)
+do
+	local holders = {}
+	for _, f in ipairs(frames) do if f.kind == "Frame" and f.icon and f.border and not f.name then holders[#holders + 1] = f end end
+	local TEX = function(id) return 100000 + id end
+	local function hit(slot) return _G["ShamanKitHit" .. slot] end
+	local function out() totems = {}; for slot = 1, 4 do fire("PLAYER_TOTEM_UPDATE", slot) end end
+	local function put(slot, name, icon) totems[slot] = { name = name, start = t, dur = 300, icon = icon }; fire("PLAYER_TOTEM_UPDATE", slot) end
+	local function gone(slot) totems[slot] = nil; fire("PLAYER_TOTEM_UPDATE", slot) end
+	local db = ShamanKitDB
+	db.order = { 2, 1, 3, 4 }; db.vertical = false; db.distanceMode = "off"; db.locked = true; db.attach = false
+	db.hold = nil; ns.fixHold(); db.rememberLast = true; db.leftCast = true; db.reserve = { [2] = true, [3] = true }
+	secretMode = false; secretPos = false; inCombat = false; ns.optionsOpen = false; pos = { y = 0, x = 0, map = 1 }
+	fire("PLAYER_ENTERING_WORLD"); out()
+	check(ns.defaults.leftCast == true, "left-click: on by default")
+
+	put(1, "Searing Totem III", TEX(3599))      -- keeps the bar up
+	put(2, "Strength of Earth Totem II", TEX(8075)); gone(2)
+	check(db.hold.lastSpell[2] == 8075, "left-click: the spell of the last totem in the place is remembered (Strength of Earth)")
+	check(hit(2).attrs["*type1"] == "spell" and hit(2).attrs["*spell1"] == "Strength of Earth Totem", "left-click: the empty place casts it by name")
+	check(holders[2].shown and hit(2).mouse == true, "left-click: and its place is clickable while the bar is up")
+	check(hit(3).attrs["*type1"] == nil and hit(3).attrs["*spell1"] == nil and hit(3).mouse == false, "left-click: a kept place that has never held a totem casts nothing and takes no clicks")
+	check(hit(4).attrs["*type1"] == nil and hit(4).mouse == false, "left-click: a place that is not kept takes no clicks")
+	check(hit(2).attrs["*type2"] == "destroytotem", "left-click: right-click still dismisses a totem")
+	check(hit(1).attrs["*spell1"] == "Searing Totem", "left-click: a place with a totem out is armed too (so it also works in a fight, when the game won't let this change)")
+
+	-- the choice and the memory
+	db.hold.choice[2] = 8143; ns.updatePreview()
+	check(hit(2).attrs["*spell1"] == "Tremor Totem", "left-click: a totem picked for the place wins over the remembered one")
+	db.rememberLast = false; ns.updatePreview()
+	check(hit(2).attrs["*spell1"] == "Tremor Totem", "left-click: ...also with remembering off")
+	db.hold.choice[2] = nil; ns.updatePreview()
+	check(hit(2).attrs["*type1"] == nil and hit(2).mouse == false, "left-click: no pick and remembering off: the place shows a generic totem and casts nothing")
+	db.rememberLast = true; ns.updatePreview()
+	check(hit(2).attrs["*spell1"] == "Strength of Earth Totem", "left-click: remembering on again: back to the last totem")
+
+	-- a totem the catalogue does not know must not leave an older one to be cast
+	put(2, "Mystery Totem", 777); gone(2)
+	check(db.hold.lastSpell[2] == nil and hit(2).attrs["*type1"] == nil, "left-click: an unknown totem clears the remembered spell (never casts the wrong, older totem)")
+	put(2, "Stoneskin Totem", TEX(8071)); gone(2)
+	check(hit(2).attrs["*spell1"] == "Stoneskin Totem", "left-click: the newest totem in the place is the one cast")
+
+	-- the lock, the switch, the settings
+	db.locked = false; ns.updatePreview()
+	check(hit(2).attrs["*type1"] == nil and hit(2).mouse == false and hit(1).attrs["*type1"] == nil, "left-click: unlocked bar: nothing casts (a left press moves it)")
+	db.locked = true; ns.updatePreview()
+	check(hit(2).attrs["*spell1"] == "Stoneskin Totem" and hit(2).mouse == true, "left-click: locked again: back")
+	db.leftCast = false; ns.updatePreview()
+	check(hit(2).attrs["*type1"] == nil and hit(1).attrs["*type1"] == nil and hit(2).mouse == false, "left-click: switched off: nothing casts and the empty place takes no clicks")
+	check(hit(1).mouse == true, "left-click: switched off: a real totem is still clickable (right-click)")
+	db.leftCast = true; ns.updatePreview()
+	check(hit(2).attrs["*type1"] == "spell", "left-click: switched on again")
+	out(); ns.optionsOpen = true; ns.updatePreview()
+	check(hit(1).attrs["*type1"] == nil and hit(2).attrs["*type1"] == nil, "left-click: settings preview: samples cast nothing")
+	ns.optionsOpen = false; ns.updatePreview()
+
+	-- no totem out at all: nothing to click
+	out()
+	check(hit(2).mouse == false and hit(3).mouse == false, "left-click: no totem out, the bar is gone: no invisible square takes clicks")
+	put(1, "Searing Totem III", TEX(3599))
+	check(hit(2).mouse == true, "left-click: a totem comes out: the kept empty place is clickable")
+
+	-- the tooltip of an empty place
+	local lines = {}
+	rawset(GameTooltip, "AddLine", function(_, text) lines[#lines + 1] = text end)
+	hit(2).scripts.OnEnter(hit(2))
+	check(GameTooltip.text == "Stoneskin Totem" and lines[1] == "Left-click to cast it", "left-click: the tooltip of the empty place names the totem and says what a click does")
+	lines = {}; hit(1).scripts.OnEnter(hit(1))
+	check(lines[1] == nil or not tostring(lines[1]):find("Left%-click to cast"), "left-click: the tooltip of a real totem is the usual one")
+	rawset(GameTooltip, "AddLine", nil)
+
+	-- a fight: nothing protected is touched; what changed waits until it is over
+	local before = hit(2).attrs["*spell1"]
+	inCombat = true; secretMode = true
+	fire("UNIT_SPELLCAST_SUCCEEDED", "player", "g", 5675)
+	totems[3] = { name = "Mana Spring Totem", start = t, dur = 300, icon = 4242 }; fire("PLAYER_TOTEM_UPDATE", 3); runTimers()
+	secretMode = false
+	check(db.hold.lastSpell[3] == 5675, "left-click: icon hidden in a fight: the spell is learnt from the cast")
+	check(hit(3).attrs["*spell1"] == nil and hit(2).attrs["*spell1"] == before, "left-click: in a fight no attribute is changed")
+	totems[3] = nil; fire("PLAYER_TOTEM_UPDATE", 3)
+	check(holders[3].shown and hit(2).mouse == true, "left-click: a totem expiring in a fight: the empty place shows and the old click still works")
+	inCombat = false; fire("PLAYER_REGEN_ENABLED")
+	check(hit(3).attrs["*spell1"] == "Mana Spring Totem" and hit(3).mouse == true, "left-click: the fight is over: the new totem is armed")
+	noErrors("left-click: nothing raised, nothing blocked")
+
+	-- no needless writes
+	local writes = 0
+	for slot = 1, 4 do
+		local f = hit(slot); local orig = f.SetAttribute
+		rawset(f, "SetAttribute", function(self, k, v) writes = writes + 1; return orig(self, k, v) end)
+	end
+	for _ = 1, 6 do ns.updatePreview() end
+	for slot = 1, 4 do rawset(hit(slot), "SetAttribute", nil) end
+	check(writes == 0, "left-click: nothing changed: no attribute is written again (" .. writes .. ")")
+
+	-- the settings box, and damaged saved data
+	local box
+	for _, f in ipairs(frames) do if f.settingKey == "leftCast" then box = f end end
+	check(box ~= nil, "settings: a box for it on the totems page")
+	box:SetChecked(false); box.scripts.OnClick(box)
+	check(db.leftCast == false and hit(2).attrs["*type1"] == nil, "settings: unticking it switches it off at once")
+	box:SetChecked(true); box.scripts.OnClick(box)
+	check(db.leftCast == true and hit(2).attrs["*type1"] == "spell", "settings: ticking it switches it on at once")
+	db.leftCast = false; savedCat.pages[3].OnDefault()
+	check(db.leftCast == true, "settings: Defaults on the totems page switches it back on")
+	for label, bad in pairs({ ["a string"] = "x", ["junk"] = { [2] = "a", [3] = {}, [1] = 8075 } }) do
+		db.hold.lastSpell = bad
+		local hh = ns.fixHold()
+		check(type(hh.lastSpell) == "table" and hh.lastSpell[2] == nil and hh.lastSpell[3] == nil, "damaged spell memory (" .. label .. ") is cleaned")
+	end
+	db.hold = nil; ns.fixHold(); db.reserve = {}; out(); ns.updatePreview()
+end
+
+
 do
 	local function out() totems = {}; for slot = 1, 4 do fire("PLAYER_TOTEM_UPDATE", slot) end end
 	local function errorsInLog(what)

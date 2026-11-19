@@ -3,7 +3,8 @@
 Small helpers for shamans, for World of Warcraft: Forever, in the default UI style.
 
 - **Totem bar**: each active totem with its time left and whether you are in range of it. Can replace the default
-  totem timers under the player frame.
+  totem timers under the player frame. Right-click a totem to dismiss it. With the bar locked, left-click a place to cast
+  the totem it shows (the dim placeholder of a kept place, or a totem that is out), also in a fight; it can be switched off.
 - **Buffs**: two small optional icons. The weapon icon either pops up when your weapon has no enchant (or one that is
   about to run out), or, if you prefer, shows which enchant is on and its time left, like the shield icon (main hand,
   hidden when dead, with no weapon or a fishing pole). The other icon shows your Lightning Shield charges while it is up. They can hang on the totem bar or the player frame (any side, any alignment, nudge and size are settings)
