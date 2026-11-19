@@ -11,6 +11,11 @@ Small helpers for shamans, for World of Warcraft: Forever, in the default UI sty
   about to run out), or, if you prefer, shows which enchant is on and its time left, like the shield icon (main hand,
   hidden when dead, with no weapon or a fishing pole). The other icon shows your Lightning Shield charges while it is up. They can hang on the totem bar or the player frame (any side, any alignment, nudge and size are settings)
   or sit in a place of their own that you drag.
+- **Buff on the totem's icon**: while the buff of a totem is on you, a small picture of that buff sits on the totem's icon.
+  The game draws it (the same way as the Lightning Shield icon), so it works in a fight and in dungeons, where no addon
+  can measure range or read buffs. No picture means you don't have the buff. The buff's spell ids are learned the first
+  time a totem's buff can be read, so drop each totem once out of a fight. A buff from someone else's identical totem
+  shows the same picture. Switch it off on the Totem bar page.
 - **Simple and advanced settings**: each settings page shows the choices most people want. The fiddly ones (exact
   nudges, screen positions, spacing, per-button placement, range-accuracy) sit behind a **Show advanced** button at the
   top right of the page; it is one switch for every page, and nothing changes in how the addon works.

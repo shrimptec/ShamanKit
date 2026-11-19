@@ -253,6 +253,7 @@ local function load(file) local f = assert(loadfile(file)); f("ShamanKit", ns) e
 load("ShamanKit/ShamanKit.lua")
 load("ShamanKit/Cures.lua")
 load("ShamanKit/Calls.lua")
+load("ShamanKit/Badges.lua")
 load("ShamanKit/Options.lua")
 load("ShamanKit/CureOptions.lua")
 load("ShamanKit/CallOptions.lua")
@@ -3241,6 +3242,171 @@ do
 	noErrors("icons: no error line in the log after all of that")
 end
 
+-- ---- the totems' buffs drawn on their icons by the game (Badges.lua): works where nothing can be read
+do
+	local db = ShamanKitDB
+	local S = ns.badgeState
+	local function clear()
+		totems = {}; secretMode = false; secretPos = false; inCombat = false; AURAS_HIDDEN = false
+		for s = 1, 4 do fire("PLAYER_TOTEM_UPDATE", s) end
+		runTimers(); tick()
+	end
+	local function settle() runTimers(); runTimers() end
+	local function lineCount(pat) local n = 0; for _, l in ipairs(ShamanKitLogDB.lines or {}) do if l:find(pat) then n = n + 1 end end return n end
+	clear()
+	local keep = { CONTAINER_FAILS, db.buffBadge, db.shieldOn }
+	CONTAINER_FAILS = false; db.buffBadge = true; db.shieldOn = false
+	S.failed = false; S.boxes = {}; S.nboxes = 0
+	db.buffIds = nil
+	BUFF_READS = true
+	pos = { y = 0, x = 0, map = 1 }
+	t = t + 10
+	check(ns.defaults.buffBadge == true, "badges: on by default")
+	check(#ns.BADGE_EVENTS == 2, "badges: two events")
+
+	-- the first time the buff can be read, its spell id is learned
+	auras["Strength of Earth"] = { spellId = 8076 }
+	totems[2] = { name = "Strength of Earth Totem", start = t, dur = 300, icon = 8 }
+	fire("PLAYER_TOTEM_UPDATE", 2); t = t + 1; tick(); settle()
+	check(db.buffIds and db.buffIds["Strength of Earth"] and db.buffIds["Strength of Earth"][8076] == true, "badges: the buff's spell id is learned from the real buff")
+	local box = S.boxes[8076]
+	check(box ~= nil and S.nboxes == 1, "badges: a game-drawn container is made for it")
+	check(box.c.slots and box.c.slots["ShamanKitTotemBuff8076"] and box.c.slots["ShamanKitTotemBuff8076"].opts.candidateFilters.includeSpellIDs[8076] == true, "badges: it shows only that buff (limited to its spell id)")
+	check(box.c.unit == "player", "badges: on the player")
+	check(box.c.shown == true and box.c.enabled == true, "badges: shown and enabled while the totem is out")
+	check(box.c.anchor[1] == "TOPLEFT" and box.c.anchor[2] == btn(2) and box.button.anchor[2] == btn(2), "badges: on the totem's icon")
+	check(box.button.w == 16 and box.button.h == 16, "badges: sized to the icon (45%)")
+	-- another rank
+	auras["Strength of Earth"] = { spellId = 25528 }; t = t + 1; tick(); settle()
+	check(db.buffIds["Strength of Earth"][25528] == true and S.boxes[25528] ~= nil and S.boxes[25528].c.shown and S.boxes[8076].c.shown, "badges: a higher rank is learned too, and both are armed on the icon")
+	-- a different size follows the icon size
+	db.size = 60; ns.updatePreview(); settle()
+	check(S.boxes[8076].button.w == 27, "badges: the badge follows the icon size")
+	db.size = 36; ns.updatePreview(); settle()
+
+	-- the totem goes: the badge goes
+	totems[2] = nil; fire("PLAYER_TOTEM_UPDATE", 2); settle()
+	check(not S.boxes[8076].c.shown and not S.boxes[25528].c.shown, "badges: no totem: no badge")
+	-- a totem with no buff to name has none
+	totems[1] = { name = "Searing Totem III", start = t, dur = 60, icon = 7 }
+	fire("PLAYER_TOTEM_UPDATE", 1); tick(); settle()
+	check(not S.boxes[8076].c.shown and S.nboxes == 2, "badges: a damage totem has no buff badge")
+	totems[1] = nil; fire("PLAYER_TOTEM_UPDATE", 1); settle()
+
+	-- the same totem again, in a fight: nothing is touched until it ends
+	totems[2] = { name = "Strength of Earth Totem", start = t, dur = 300, icon = 8 }
+	AURAS_HIDDEN = true; inCombat = true
+	local writes = 0
+	for _, bx in pairs(S.boxes) do
+		for _, o in ipairs({ bx.c, bx.button }) do
+			local orig = o.SetPoint
+			rawset(o, "SetPoint", function(...) writes = writes + 1; return orig(...) end)
+			local oShow = o.Show
+			rawset(o, "Show", function(...) writes = writes + 1; return oShow(...) end)
+		end
+	end
+	local before = S.nboxes
+	local okf = pcall(function() fire("PLAYER_TOTEM_UPDATE", 2); settle(); ns.badgeApply() end)
+	check(okf and writes == 0 and S.nboxes == before and S.pending == true, "badges: in a fight no container is made, moved or shown")
+	AURAS_HIDDEN = false; inCombat = false
+	fire("PLAYER_REGEN_ENABLED"); settle(); runTimers()
+	local cf2
+	for _, f in ipairs(frames) do if f.registered and f.registered.PLAYER_REGEN_ENABLED and f.registered.PLAYER_ENTERING_WORLD and not f.registered.SPELLS_CHANGED and not f.registered.ADDON_LOADED then cf2 = f end end
+	check(cf2 ~= nil, "badges: a frame listens for the end of a fight")
+	cf2.scripts.OnEvent(cf2, "PLAYER_REGEN_ENABLED"); settle()
+	check(writes > 0 and S.boxes[8076].c.shown and S.pending == false, "badges: after the fight the badge is put on the icon")
+	for _, bx in pairs(S.boxes) do for _, o in ipairs({ bx.c, bx.button }) do rawset(o, "SetPoint", nil); rawset(o, "Show", nil) end end
+	-- auras hidden out of a fight (as some places do): the same waiting
+	local keepKey = S.boxes[8076].key
+	totems[2] = nil; fire("PLAYER_TOTEM_UPDATE", 2); settle()
+	totems[3] = { name = "Mana Spring Totem", start = t, dur = 300, icon = 9 }
+	AURAS_HIDDEN = true
+	fire("PLAYER_TOTEM_UPDATE", 3); settle()
+	check(S.pending == true, "badges: auras hidden: it waits")
+	AURAS_HIDDEN = false; cf2.scripts.OnEvent(cf2, "PLAYER_REGEN_ENABLED"); settle()
+	totems[3] = nil; fire("PLAYER_TOTEM_UPDATE", 3); settle()
+
+	-- the option
+	totems[2] = { name = "Strength of Earth Totem", start = t, dur = 300, icon = 8 }
+	fire("PLAYER_TOTEM_UPDATE", 2); settle()
+	check(S.boxes[8076].c.shown == true, "badges: on")
+	db.buffBadge = false; ns.badgeSchedule(); settle()
+	check(not S.boxes[8076].c.shown and not S.boxes[8076].c.enabled, "badges: switched off: gone")
+	db.buffBadge = true; ns.badgeSchedule(); settle()
+	check(S.boxes[8076].c.shown == true, "badges: switched on again: back")
+	local pageOpt
+	for _, f in ipairs(frames) do if f.settingKey == "buffBadge" and f.parentFrame == savedCat.pages[2] then pageOpt = f end end
+	check(pageOpt ~= nil, "badges: a box on the Totem bar page")
+	pageOpt:SetChecked(false); pageOpt.scripts.OnClick(pageOpt); settle()
+	check(db.buffBadge == false and not S.boxes[8076].c.shown, "badges: unticking it hides them at once")
+	db.buffBadge = false; savedCat.pages[2].OnDefault()
+	check(db.buffBadge == true, "badges: the page's Defaults switches it on")
+	settle()
+
+	-- only plain numbers that name a spell are learned; the list per buff stays short
+	local ids0 = db.buffIds["Strength of Earth"]
+	local n0 = 0; for _ in pairs(ids0) do n0 = n0 + 1 end
+	ns.learnBuff("Strength of Earth", secret()); ns.learnBuff("Strength of Earth", "x"); ns.learnBuff("Strength of Earth", 1); ns.learnBuff("Strength of Earth", 0/0)
+	ns.learnBuff(nil, 5); ns.learnBuff("", 5); ns.learnBuff(12, 5)
+	local n1 = 0; for _ in pairs(db.buffIds["Strength of Earth"]) do n1 = n1 + 1 end
+	check(n1 == n0 and db.buffIds[""] == nil and db.buffIds[12] == nil, "badges: a secret, a word, nonsense or a missing name is never learned")
+	for i = 1, 40 do ns.learnBuff("Stoneskin", 9000 + i) end
+	local n2 = 0; for _ in pairs(db.buffIds["Stoneskin"]) do n2 = n2 + 1 end
+	check(n2 == 16, "badges: at most 16 ids per buff (" .. n2 .. ")")
+	db.buffIds["Stoneskin"] = nil
+
+	-- the status lines
+	local out = {}
+	local pr = print; print = function(...) out[#out + 1] = table.concat({ ... }, " ") end
+	SlashCmdList.SHAMANKIT("status")
+	print = pr
+	local joined = table.concat(out, "\n")
+	check(joined:find("buff badges: on, 2 drawn by the game") and joined:find("Strength of Earth %(8076,25528%)"), "badges: /shamankit status lists the learned ids")
+
+	-- a pass with nothing changed writes nothing
+	local rw = 0
+	for _, bx in pairs(S.boxes) do
+		for _, o in ipairs({ bx.c, bx.button }) do local orig = o.SetPoint; rawset(o, "SetPoint", function(...) rw = rw + 1; return orig(...) end) end
+	end
+	totems[2] = { name = "Strength of Earth Totem", start = t, dur = 300, icon = 8 }
+	fire("PLAYER_TOTEM_UPDATE", 2); settle()
+	rw = 0
+	for _ = 1, 5 do ns.badgeApply() end
+	check(rw == 0, "badges: a pass with nothing changed moves nothing (" .. rw .. ")")
+	for _, bx in pairs(S.boxes) do for _, o in ipairs({ bx.c, bx.button }) do rawset(o, "SetPoint", nil) end end
+	-- never more containers than the cap (there is no way to remove one)
+	for i = 1, 14 do ns.learnBuff("Strength of Earth", 20000 + i) end
+	totems[3] = { name = "Mana Spring Totem", start = t, dur = 300, icon = 9 }
+	auras["Mana Spring"] = { spellId = 5677 }
+	fire("PLAYER_TOTEM_UPDATE", 3)
+	for i = 1, 16 do ns.learnBuff("Mana Spring", 30000 + i) end
+	settle()
+	check(S.nboxes == 24, "badges: containers are capped at 24 (" .. S.nboxes .. ")")
+	totems[2] = nil; totems[3] = nil; fire("PLAYER_TOTEM_UPDATE", 2); fire("PLAYER_TOTEM_UPDATE", 3); settle()
+	S.boxes = {}; S.nboxes = 0; db.buffIds = { ["Strength of Earth"] = { [8076] = true, [25528] = true } }
+
+	-- a game that will not make the container: no error, no retries
+	totems[2] = nil; fire("PLAYER_TOTEM_UPDATE", 2); settle()
+	CONTAINER_FAILS = true
+	local attempts = 0
+	local realCreate = CreateFrame
+	CreateFrame = function(kind, ...) if kind == "AuraContainer" then attempts = attempts + 1 end return realCreate(kind, ...) end
+	totems[4] = { name = "Windfury Totem", start = t, dur = 300, icon = 10 }
+	auras["Windfury Totem"] = { spellId = 8515 }
+	fire("PLAYER_TOTEM_UPDATE", 4); t = t + 1; tick(); settle()
+	local okc = pcall(function() fire("PLAYER_TOTEM_UPDATE", 4); tick(); settle(); ns.badgeApply(); ns.badgeApply() end)
+	CreateFrame = realCreate
+	check(okc and S.failed == true and attempts == 1, "badges: a container that can't be made is tried once (" .. attempts .. ")")
+	check(lineCount("BADGE container could not be made for spell 8515") == 1, "badges: ...and the log says why")
+	check(joined:find("buff badges") ~= nil, "badges: (status ran)")
+
+	clear()
+	CONTAINER_FAILS, db.buffBadge, db.shieldOn = keep[1], keep[2], keep[3]
+	S.failed = false; S.boxes = {}; S.nboxes = 0; db.buffIds = nil
+	BUFF_READS = false; auras["Strength of Earth"] = nil; auras["Windfury Totem"] = nil
+	noErrors("badges: nothing raised an error in the log")
+end
+
 -- ---- a dungeon: no position can be read at all, and the buffs are hidden in a fight
 do
 	local db = ShamanKitDB
@@ -3818,7 +3984,7 @@ do
 		cureWash = true, cureWashAlpha = 65, cureSize = 29, cureSpacing = 4, curePoint = "BOTTOM", cureRelPoint = "BOTTOM", cureX = -482, cureY = 337,
 		callOn = false, callTotemic = true, callRecall = false, callShow = "bar", callScale = 55, callSide = "right", callAnchor = "bar", callAlign = "start", callChoice = 0,
 		posCallOwn = true, posCallSide = "left", posCallAlign = "start", posTotemicOwn = true, posTotemicSide = "top", posTotemicAlign = "center",
-		posRecallOwn = true, posRecallSide = "right", posRecallAlign = "start", showAdvanced = false,
+		posRecallOwn = true, posRecallSide = "right", posRecallAlign = "start", showAdvanced = false, buffBadge = true,
 	}
 	local bad = {}
 	for k, v in pairs(want) do if SHIPPED[k] ~= v then bad[#bad + 1] = k .. "=" .. tostring(SHIPPED[k]) end end

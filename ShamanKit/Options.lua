@@ -276,7 +276,7 @@ function ns.buildOptions()
 	-- ------------------------------------------------------------ page 1: the totem bar
 	local main = newPage("Totem bar", "Totem bar",
 		"Your active totems, how long they have left, and whether you are in range of each.",
-		{ "size", "spacing", "vertical", "showTimer", "showRange", "showOut", "tint", "distanceMode", "rangeByBuff", "attach", "attachX", "attachY", "locked" })
+		{ "size", "spacing", "vertical", "showTimer", "showRange", "showOut", "tint", "distanceMode", "rangeByBuff", "buffBadge", "attach", "attachX", "attachY", "locked" })
 	local p1 = main.panel
 
 	header(p1, "Totem icons", LEFT, -88, COLW)
@@ -313,14 +313,18 @@ function ns.buildOptions()
 	reset:SetPoint("TOPLEFT", RIGHT, -208)
 	reset:SetText("Reset position")
 	reset:SetScript("OnClick", function() ns.resetPosition(); main.refresh() end)
-	note(p1, "Or press Move on screen (top right): every piece\nshows at once and you drag it where you want it.", RIGHT, -242)
+	note(p1, "Move on screen (top right) drags everything at once.", RIGHT, -240)
+
+	header(p1, "Buff on the icon", RIGHT, -268, COLW)
+	main.add(checkbox(p1, "Show the totem's buff on its icon", "buffBadge", RIGHT, -292))
+	note(p1, "A small picture of the buff while you have it. The game\ndraws it, so it works in a fight and in dungeons, where\nrange can't be measured. No picture: you don't have it.", RIGHT + 28, -320)
 
 	-- advanced: exact nudges while under the player frame, and how the range is judged
-	local offX = main.adv(main.add(slider(p1, "Position left / right (under the player frame)", "attachX", -200, 300, RIGHT, -292)))
-	local offY = main.adv(main.add(slider(p1, "Position up / down (under the player frame)", "attachY", -100, 100, RIGHT, -347)))
-	main.adv(header(p1, "Range accuracy", RIGHT, -410, COLW))
-	main.adv(main.add(checkbox(p1, "Watch the totem's buff", "rangeByBuff", RIGHT, -436)))
-	main.adv(note(p1, "A totem lands a little to one side of you, so your\nposition is only a guess. On: a buff totem is judged by\nits buff when the game lets addons see it, and close to\nthe edge the mark is a yellow ? instead of a guess.", RIGHT + 28, -464))
+	local offX = main.adv(main.add(slider(p1, "Position left / right (under the player frame)", "attachX", -200, 300, RIGHT, -372)))
+	local offY = main.adv(main.add(slider(p1, "Position up / down (under the player frame)", "attachY", -100, 100, RIGHT, -427)))
+	main.adv(header(p1, "Range accuracy", RIGHT, -488, COLW))
+	main.adv(main.add(checkbox(p1, "Watch the totem's buff", "rangeByBuff", RIGHT, -514)))
+	main.adv(note(p1, "On: a buff totem is judged by its buff when the game lets\naddons see it; close to the edge the mark is a yellow ?.", RIGHT + 28, -542))
 
 	-- offsets only matter while attached; dragging only while detached (the small icons can be dragged on their own)
 	local function mainDependents()

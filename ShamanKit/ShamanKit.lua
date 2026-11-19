@@ -397,7 +397,13 @@ local function hasAura(name)
 	if aurasHidden() then return nil end
 	if C_UnitAuras and C_UnitAuras.GetAuraDataBySpellName then
 		local ok, data = pcall(C_UnitAuras.GetAuraDataBySpellName, "player", name, "HELPFUL")
-		if ok and not isSecret(data) then return data ~= nil end
+		if ok and not isSecret(data) then
+			if data ~= nil and ns.learnBuff then      -- the buff's spell id, for the game-drawn badge (Badges.lua)
+				local okid, id = pcall(function() return data.spellId end)
+				if okid and readable(id) then ns.learnBuff(name, id) end
+			end
+			return data ~= nil
+		end
 	end
 	return nil
 end
@@ -599,6 +605,8 @@ local function newHolder(slot)
 end
 
 function ns.holder(slot) return holds[slot] end
+function ns.barButton(slot) return buttons[slot] end      -- (Badges.lua puts the totem's buff on its icon)
+function ns.barState(slot) return state[slot] end
 
 -- The clickable layer. Right-click dismisses the totem: the game only lets its own secure code do that,
 -- so each slot gets a secure button with the built-in "destroytotem" action (what the default totem bar
@@ -934,6 +942,7 @@ local function updateShown()
 	-- out, everything on it is hidden, so an empty bar is simply invisible.
 	ns.refreshHolders()
 	if ns.callApply then ns.callApply() end    -- the Call spell buttons may follow the bar (only while a totem is out)
+	if ns.badgeSchedule then ns.badgeSchedule() end   -- the game-drawn buff badges follow the icons
 end
 
 local function refreshAll()
@@ -1790,6 +1799,7 @@ local function build()
 	layout()
 	ns.bar = bar
 	if ns.callInit then ns.callInit() end     -- the Call spell buttons (Calls.lua) need the bar to sit beside
+	if ns.badgeInit then ns.badgeInit() end   -- the totems' buff badges (Badges.lua)
 
 	local acc = 0
 	bar:SetScript("OnUpdate", function(_, elapsed)
@@ -2025,6 +2035,7 @@ SlashCmdList.SHAMANKIT = function(msg)
 			(up == true and not isSecret(n)) and (", charges " .. tostring(n)) or "", db.shieldOn and "icon on" or "icon off"))
 		print("|cff33ff99ShamanKit|r shield icon: " .. ns.boxInfo())
 		if ns.callInfo then for _, line in ipairs(ns.callInfo()) do print("|cff33ff99ShamanKit|r calls: " .. line) end end
+		if ns.badgeInfo then for _, line in ipairs(ns.badgeInfo()) do print("|cff33ff99ShamanKit|r " .. line) end end
 	elseif ns.openOptions then
 		ns.openOptions(msg)   -- "bar", "totems" or "buffs" open that page
 	end

@@ -2,7 +2,7 @@
 ## Title: ShamanKit
 ## Notes: Shaman helpers: totem timers and range, weapon enchant and Lightning Shield reminders, cure spells that light up. /shamankit
 ## Author: shrimptec
-## Version: 0.19.3
+## Version: 0.20.0
 ## X-Website: https://github.com/shrimptec/ShamanKit
 ## SavedVariables: ShamanKitDB
 ## SavedVariablesPerCharacter: ShamanKitLogDB
@@ -11,6 +11,7 @@
 ShamanKit.lua
 Cures.lua
 Calls.lua
+Badges.lua
 Options.lua
 CureOptions.lua
 CallOptions.lua
