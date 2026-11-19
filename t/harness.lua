@@ -282,6 +282,7 @@ local BASELINE = {
 	auxAnchor = "bar", auxScale = 75, auxPoint = "CENTER", auxRelPoint = "CENTER", auxX = 0, auxY = -260,
 	cureSize = 36, cureWashAlpha = 30, curePoint = "CENTER", cureRelPoint = "CENTER", cureX = 0, cureY = -160,
 	callTotemic = false, callShow = "always", callScale = 100, callSide = "start",
+	showAdvanced = true,      -- the older settings tests look at every control
 }
 for _, k in ipairs({ "posCall", "posTotemic", "posRecall" }) do
 	BASELINE[k .. "Own"], BASELINE[k .. "Side"], BASELINE[k .. "Align"] = false, "start", "start"
@@ -3240,6 +3241,105 @@ do
 	noErrors("icons: no error line in the log after all of that")
 end
 
+-- ---- Simple / Advanced: the fiddly settings hide until "Show advanced"
+do
+	local db = ShamanKitDB
+	local P = savedCat.pages            -- 1 home, 2 Totem bar, 3 Totems, 4 Buffs, 5 Cures, 6 Call spells
+	local function box(page, key) for _, f in ipairs(frames) do if f.settingKey == key and f.parentFrame == page then return f end end end
+	local function sliders(page) local l = {}; for _, f in ipairs(frames) do if f.kind == "Slider" and f.parentFrame == page then l[#l + 1] = f end end return l end
+	local function radios(page, ...)
+		local want, l = { ... }, {}
+		for _, f in ipairs(frames) do
+			if type(f.value) == "string" and f.parentFrame == page and f.scripts.OnClick then
+				for _, w in ipairs(want) do if f.value == w then l[#l + 1] = f end end
+			end
+		end
+		return l
+	end
+	local function shownAll(list) for _, f in ipairs(list) do if f.shown == false then return false end end return #list > 0 end
+	local function hiddenAll(list) for _, f in ipairs(list) do if f.shown ~= false then return false end end return #list > 0 end
+	local function find(page, text) for _, f in ipairs(frames) do if f.kind == "Button" and f.text == text and f.parentFrame == page then return f end end end
+
+	check(SHIPPED.showAdvanced == false, "advanced: hidden to begin with")
+	for i = 2, 6 do
+		local b = P[i].advButton
+		check(b ~= nil, "advanced: page " .. i .. " has the toggle button")
+		if i == 3 then check(b.shown == false, "advanced: the Totems page has nothing advanced: no button")
+		else check(b.shown ~= false, "advanced: page " .. i .. ": the button shows") end
+	end
+
+	db.showAdvanced = false
+	for _, pg in ipairs(P) do if pg.OnRefresh then pg.OnRefresh() end end
+	-- Totem bar
+	check(shownAll({ box(P[2], "attach"), box(P[2], "locked"), find(P[2], "Reset position") }), "advanced: totem bar: the attach box, the unlock box and reset stay")
+	check(hiddenAll({ box(P[2], "rangeByBuff"), sliders(P[2])[3], sliders(P[2])[4] }), "advanced: totem bar: the range option and the exact position sliders hide")
+	check(shownAll({ sliders(P[2])[1], sliders(P[2])[2], box(P[2], "vertical"), box(P[2], "showTimer") }), "advanced: totem bar: size, spacing, layout and timer stay")
+	check(sliders(P[2])[3].title.shown == false and sliders(P[2])[3].valueText.shown == false and sliders(P[2])[1].title.shown ~= false, "advanced: a hidden slider takes its title and its number with it")
+	-- Buffs
+	check(shownAll({ box(P[4], "weaponOn"), box(P[4], "shieldOn"), sliders(P[4])[1] }) and shownAll(radios(P[4], "missing", "active")), "advanced: buffs: the icons, their mode and the size stay")
+	check(shownAll(radios(P[4], "player")), "advanced: buffs: 'attach to' stays")
+	check(hiddenAll({ sliders(P[4])[2], box(P[4], "locked"), find(P[4], "Reset icon position"), sliders(P[4])[3], sliders(P[4])[4], sliders(P[4])[5], sliders(P[4])[6] }) and hiddenAll(radios(P[4], "bottom", "top", "center", "end")), "advanced: buffs: warning time, moving, side, alignment and nudges hide")
+	-- Cures
+	check(shownAll({ box(P[5], "cureOn"), box(P[5], "cureBars"), box(P[5], "cureRow"), box(P[5], "cureAlways"), box(P[5], "cureClick"), box(P[5], "cureWash"), sliders(P[5])[1] }), "advanced: cures: the main choices stay")
+	check(hiddenAll({ box(P[5], "curePulse"), box(P[5], "cureCount"), box(P[5], "locked"), sliders(P[5])[2], sliders(P[5])[3], find(P[5], "Reset position") }), "advanced: cures: spacing, strength, pulse, number and moving hide")
+	check(shownAll({ find(P[5], "Poison"), find(P[5], "Clear") }), "advanced: cures: the test buttons stay")
+	-- Call spells
+	check(shownAll({ box(P[6], "callOn"), box(P[6], "callTotemic"), box(P[6], "callRecall"), sliders(P[6])[1] }) and shownAll(radios(P[6], "always")), "advanced: calls: the buttons, when they show and their size stay")
+	check(hiddenAll({ box(P[6], "posCallOwn"), box(P[6], "locked"), find(P[6], "Reset button position"), sliders(P[6])[2], sliders(P[6])[3], sliders(P[6])[4], sliders(P[6])[5] }) and hiddenAll(radios(P[6], "all", "totemic", "recall", "free", "bottom", "top", "center")), "advanced: calls: the per-button position controls hide")
+
+	-- the button turns it on everywhere
+	check(P[2].advButton.text == "Show advanced", "advanced: the button offers to show")
+	P[2].advButton.scripts.OnClick()
+	check(db.showAdvanced == true and P[2].advButton.text == "Hide advanced" and P[6].advButton.text == "Hide advanced", "advanced: one press: on, and every page's button says so")
+	check(shownAll({ box(P[2], "rangeByBuff"), sliders(P[2])[3], sliders(P[2])[4] }), "advanced: totem bar: the hidden ones are back")
+	check(shownAll({ sliders(P[4])[2], box(P[4], "locked"), find(P[4], "Reset icon position") }) and shownAll(radios(P[4], "bottom", "top", "center", "end")), "advanced: buffs: back")
+	check(shownAll({ box(P[5], "curePulse"), box(P[5], "cureCount"), sliders(P[5])[2], sliders(P[5])[3], find(P[5], "Reset position") }), "advanced: cures: back")
+	check(shownAll(radios(P[6], "all", "totemic", "recall", "free", "bottom")), "advanced: calls: back")
+
+	-- what applies to the situation decides inside the advanced part
+	db.auxAnchor = "bar"; P[4].OnRefresh()
+	check(shownAll({ sliders(P[4])[3], sliders(P[4])[4] }) and hiddenAll({ sliders(P[4])[5], sliders(P[4])[6] }) and shownAll(radios(P[4], "bottom")), "advanced: buffs attached: the nudges show, the screen position does not")
+	db.auxAnchor = "free"; P[4].OnRefresh()
+	check(hiddenAll({ sliders(P[4])[3], sliders(P[4])[4] }) and shownAll({ sliders(P[4])[5], sliders(P[4])[6] }) and hiddenAll(radios(P[4], "bottom", "end")), "advanced: buffs in their own place: the screen position shows, side and alignment do not")
+	db.auxAnchor = "bar"; P[4].OnRefresh()
+	local freeRb, barRb = radios(P[4], "free")[1], radios(P[4], "bar")[1]
+	freeRb.scripts.OnClick(freeRb)
+	check(hiddenAll({ sliders(P[4])[3], sliders(P[4])[4] }) and shownAll({ sliders(P[4])[5], sliders(P[4])[6] }), "advanced: buffs: choosing 'own place' swaps the sliders at once")
+	barRb.scripts.OnClick(barRb)
+	check(shownAll({ sliders(P[4])[3], sliders(P[4])[4] }) and hiddenAll({ sliders(P[4])[5], sliders(P[4])[6] }), "advanced: buffs: ...and back")
+	ns.callTarget = "all"; db.callAnchor = "bar"; P[6].OnRefresh()
+	check(box(P[6], "posCallOwn").shown == false and shownAll({ sliders(P[6])[2], sliders(P[6])[3] }) and hiddenAll({ sliders(P[6])[4], sliders(P[6])[5] }), "advanced: calls, all together, attached: no 'on its own' box, nudges")
+	local rb = radios(P[6], "totemic")[1]
+	rb.scripts.OnClick(rb)
+	check(box(P[6], "posCallOwn").shown ~= false, "advanced: calls: a button picked: the 'on its own' box shows")
+	ns.callTarget = "all"; P[6].OnRefresh()
+	db.callAnchor = "free"; P[6].OnRefresh()
+	check(shownAll({ sliders(P[6])[4], sliders(P[6])[5] }) and hiddenAll({ sliders(P[6])[2], sliders(P[6])[3] }), "advanced: calls in their own place: the screen position shows instead")
+	db.callAnchor = "bar"; P[6].OnRefresh()
+
+	-- it is a preference of the window: Defaults leaves it, hidden controls keep their values
+	db.rangeByBuff = false; db.cureSpacing = 11
+	P[2].OnDefault(); P[5].OnDefault()
+	check(db.showAdvanced == true, "advanced: a page's Defaults button leaves the preference alone")
+	P[2].advButton.scripts.OnClick()
+	check(db.showAdvanced == false and hiddenAll({ box(P[2], "rangeByBuff"), sliders(P[5])[2] }), "advanced: pressed again: hidden")
+	db.cureSpacing = 11; db.attachX = 33
+	P[5].OnRefresh()
+	check(db.cureSpacing == 11 and db.attachX == 33, "advanced: hiding a control never changes its value")
+
+	-- nothing sits lower than the window can show
+	local deepest, where = 0, ""
+	for i = 2, 6 do
+		for _, f in ipairs(frames) do
+			local a = f.anchor
+			if f.parentFrame == P[i] and a and a[1] == "TOPLEFT" and type(a[3]) == "number" and -a[3] > deepest then deepest, where = -a[3], "page " .. i end
+		end
+	end
+	check(deepest <= 560, "advanced: nothing is placed lower than 560 (" .. deepest .. " at " .. where .. ")")
+	db.showAdvanced = true       -- the older tests below this point were written with everything showing
+	for _, pg in ipairs(P) do if pg.OnRefresh then pg.OnRefresh() end end
+end
+
 -- ---- Move mode: every piece as a frame you drag (Move.lua)
 do
 	local db = ShamanKitDB
@@ -3492,7 +3592,7 @@ do
 		cureWash = true, cureWashAlpha = 65, cureSize = 29, cureSpacing = 4, curePoint = "BOTTOM", cureRelPoint = "BOTTOM", cureX = -482, cureY = 337,
 		callOn = false, callTotemic = true, callRecall = false, callShow = "bar", callScale = 55, callSide = "right", callAnchor = "bar", callAlign = "start", callChoice = 0,
 		posCallOwn = true, posCallSide = "left", posCallAlign = "start", posTotemicOwn = true, posTotemicSide = "top", posTotemicAlign = "center",
-		posRecallOwn = true, posRecallSide = "right", posRecallAlign = "start",
+		posRecallOwn = true, posRecallSide = "right", posRecallAlign = "start", showAdvanced = false,
 	}
 	local bad = {}
 	for k, v in pairs(want) do if SHIPPED[k] ~= v then bad[#bad + 1] = k .. "=" .. tostring(SHIPPED[k]) end end

@@ -123,6 +123,7 @@ local function header(parent, text, x, y, width)
 	line:SetColorTexture(0.5, 0.5, 0.5, 0.45)
 	line:SetPoint("TOPLEFT", x, y - 17)
 	line:SetSize(width, 1)
+	fs.line = line
 	return fs
 end
 
@@ -144,6 +145,7 @@ local function enableGroup(group, on)
 end
 
 local LEFT, RIGHT, COLW = 16, 320, 280
+ns.defaults.showAdvanced = false          -- a preference of the settings window, not a layout setting
 
 function ns.buildOptions()
 	if not (Settings and Settings.RegisterCanvasLayoutCategory) then return end
@@ -151,15 +153,41 @@ function ns.buildOptions()
 	-- Every page tells the bar to show its samples while it is on screen; two pages can be swapped in one go
 	-- (one hides as the other shows), so count the pages that are up instead of keeping one flag.
 	local up = {}
+	local allPages = {}
 	function ns.pagesUp() return next(up) ~= nil end
 	local function newPage(name, title, subtitle, keys)
 		local panel = CreateFrame("Frame")
 		panel.name = name
-		local page = { panel = panel, controls = {}, after = {}, keys = keys }
+		local page = { panel = panel, controls = {}, after = {}, keys = keys, advItems = {} }
+		allPages[#allPages + 1] = page
 		function page.add(c) page.controls[#page.controls + 1] = c; return c end
+		-- Advanced: the fiddly controls hide until "Show advanced" (top right of every page that has some). obj is a frame,
+		-- a heading, a radio group or a slider; cond (optional) is a further reason to show it.
+		function page.adv(obj, cond)
+			local regions = {}
+			if obj.rbs then
+				for _, rb in ipairs(obj.rbs) do regions[#regions + 1] = rb end
+			else
+				for _, r in ipairs({ obj, obj.title, obj.valueText, obj.line }) do regions[#regions + 1] = r end
+			end
+			page.advItems[#page.advItems + 1] = { regions = regions, cond = cond }
+			return obj
+		end
+		function page.applyAdvanced()
+			local on = ns.get() and ns.get().showAdvanced == true
+			for _, it in ipairs(page.advItems) do
+				local show = on and (it.cond == nil or it.cond()) and true or false
+				for _, r in ipairs(it.regions) do if show then r:Show() else r:Hide() end end
+			end
+			if page.advButton then
+				page.advButton:SetShown(#page.advItems > 0)
+				page.advButton:SetText(on and "Hide advanced" or "Show advanced")
+			end
+		end
 		function page.refresh()
 			for _, c in ipairs(page.controls) do c.refresh() end
 			for _, f in ipairs(page.after) do f() end
+			page.applyAdvanced()
 		end
 		local t = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
 		t:SetPoint("TOPLEFT", 16, -16)
@@ -178,6 +206,25 @@ function ns.buildOptions()
 		end)
 		mv:SetScript("OnLeave", GameTooltip_Hide)
 		panel.moveButton = mv
+		local av = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+		av:SetSize(130, 22)
+		av:SetPoint("TOPRIGHT", -176, -14)
+		av:SetText("Show advanced")
+		av:SetScript("OnClick", function()
+			local d = ns.get()
+			d.showAdvanced = not d.showAdvanced
+			for _, pg in ipairs(allPages) do pg.applyAdvanced() end
+		end)
+		av:SetScript("OnEnter", function(self)
+			GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+			GameTooltip:SetText("Advanced settings")
+			GameTooltip:AddLine("Fine positions, spacing and other settings most people never need. Everything works without them.", 1, 1, 1, true)
+			GameTooltip:Show()
+		end)
+		av:SetScript("OnLeave", GameTooltip_Hide)
+		av:Hide()
+		page.advButton = av
+		panel.advButton = av
 		note(panel, subtitle, 16, -42)
 		panel:SetScript("OnShow", function()
 			up[panel] = true
@@ -257,21 +304,23 @@ function ns.buildOptions()
 	header(p1, "Position", RIGHT, -88, COLW)
 	local attach = main.add(checkbox(p1, "Replace the default totem timers", "attach", RIGHT, -114))
 	note(p1, "(sits under the player frame while this is ticked)", RIGHT + 28, -140)
-	local offX = main.add(slider(p1, "Position left / right", "attachX", -200, 300, RIGHT + 24, -162))
-	local offY = main.add(slider(p1, "Position up / down", "attachY", -100, 100, RIGHT + 24, -217))
 	-- "locked" is stored the other way round to how the box reads
-	local unlock = main.add(checkbox(p1, "Unlock frame (drag it to move)", "locked", RIGHT, -274,
+	local unlock = main.add(checkbox(p1, "Unlock frame (drag it to move)", "locked", RIGHT, -170,
 		function() return ns.get().locked == false end,
 		function(on) ns.get().locked = not on end))
 	local reset = CreateFrame("Button", nil, p1, "UIPanelButtonTemplate")
 	reset:SetSize(140, 24)
-	reset:SetPoint("TOPLEFT", RIGHT, -312)
+	reset:SetPoint("TOPLEFT", RIGHT, -208)
 	reset:SetText("Reset position")
 	reset:SetScript("OnClick", function() ns.resetPosition(); main.refresh() end)
+	note(p1, "Or press Move on screen (top right): every piece\nshows at once and you drag it where you want it.", RIGHT, -242)
 
-	header(p1, "Range accuracy", RIGHT, -354, COLW)
-	main.add(checkbox(p1, "Watch the totem's buff", "rangeByBuff", RIGHT, -380))
-	note(p1, "A totem lands a little to one side of you, so your\nposition is only a guess. On: a buff totem is judged by\nits buff when the game lets addons see it, and close to\nthe edge the mark is a yellow ? instead of a guess.", RIGHT + 28, -408)
+	-- advanced: exact nudges while under the player frame, and how the range is judged
+	local offX = main.adv(main.add(slider(p1, "Position left / right (under the player frame)", "attachX", -200, 300, RIGHT, -292)))
+	local offY = main.adv(main.add(slider(p1, "Position up / down (under the player frame)", "attachY", -100, 100, RIGHT, -347)))
+	main.adv(header(p1, "Range accuracy", RIGHT, -410, COLW))
+	main.adv(main.add(checkbox(p1, "Watch the totem's buff", "rangeByBuff", RIGHT, -436)))
+	main.adv(note(p1, "A totem lands a little to one side of you, so your\nposition is only a guess. On: a buff totem is judged by\nits buff when the game lets addons see it, and close to\nthe edge the mark is a yellow ? instead of a guess.", RIGHT + 28, -464))
 
 	-- offsets only matter while attached; dragging only while detached (the small icons can be dragged on their own)
 	local function mainDependents()
@@ -415,22 +464,24 @@ function ns.buildOptions()
 		function(v) ns.get().weaponMode = v end)
 	icons.add(weaponMode)
 	icons.add(checkbox(p3, "Lightning Shield charges", "shieldOn", LEFT, -198))
-	local warnSlider = icons.add(slider(p3, "Warn when the weapon enchant has under", "auxWarnMin", 0, 10, LEFT, -234,
-		function(v) return v == 0 and "only when gone" or (v .. (v == 1 and " minute" or " minutes")) end))
 
-	header(p3, "Size", LEFT, -296, COLW)
-	icons.add(slider(p3, "Icon size (% of the totem icons)", "auxScale", 50, 120, LEFT, -320, function(v) return v .. "%" end, 5))
+	header(p3, "Size", LEFT, -244, COLW)
+	icons.add(slider(p3, "Icon size (% of the totem icons)", "auxScale", 50, 120, LEFT, -268, function(v) return v .. "%" end, 5))
 
-	header(p3, "Moving", LEFT, -384, COLW)
-	local unlockIcons = icons.add(checkbox(p3, "Unlock to drag the icons", "locked", LEFT, -408,
+	-- advanced, left: when the weapon icon warns, and dragging by hand
+	local warnSlider = icons.adv(icons.add(slider(p3, "Warn when the weapon enchant has under", "auxWarnMin", 0, 10, LEFT, -336,
+		function(v) return v == 0 and "only when gone" or (v .. (v == 1 and " minute" or " minutes")) end)))
+	icons.adv(header(p3, "Moving", LEFT, -404, COLW))
+	local unlockIcons = icons.adv(icons.add(checkbox(p3, "Unlock to drag the icons", "locked", LEFT, -428,
 		function() return ns.get().locked == false end,
-		function(on) ns.get().locked = not on end))
-	note(p3, "Only for \"Own place\"; it unlocks the totem bar too.\nDrag while this page is open, or use the sliders.", LEFT + 28, -436)
+		function(on) ns.get().locked = not on end)))
+	icons.adv(note(p3, "Only for \"Own place\"; it unlocks the totem bar too.\nDrag while this page is open, or use the sliders.", LEFT + 28, -456))
 	local resetIcons = CreateFrame("Button", nil, p3, "UIPanelButtonTemplate")
 	resetIcons:SetSize(160, 24)
-	resetIcons:SetPoint("TOPLEFT", LEFT, -472)
+	resetIcons:SetPoint("TOPLEFT", LEFT, -492)
 	resetIcons:SetText("Reset icon position")
 	resetIcons:SetScript("OnClick", function() ns.resetAuxPlace(); icons.refresh() end)
+	icons.adv(resetIcons)
 
 	header(p3, "Position", RIGHT, -78, COLW)
 	local anchorLabel = p3:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
@@ -442,30 +493,40 @@ function ns.buildOptions()
 		function() return ns.auxMode() end,
 		function(v) ns.get().auxAnchor = v end)
 	icons.add(anchor)
+	note(p3, "Or press Move on screen (top right) and drag them\nwhere you want them.", RIGHT, -152)
+
+	-- advanced, right: the side, the place along it and the exact nudges (or the screen position, in an own place)
 	local sideLabel = p3:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-	sideLabel:SetPoint("TOPLEFT", RIGHT, -150)
+	sideLabel:SetPoint("TOPLEFT", RIGHT, -196)
 	sideLabel:SetText("Side of it:")
+	icons.adv(sideLabel, function() return ns.auxMode() ~= "free" end)
 	local side = radioGroup(p3, {
 		{ "auto", "Auto" }, { "bottom", "Below" }, { "top", "Above" }, { "left", "Left" }, { "right", "Right" },
-	}, RIGHT, -168, 3, 76, 24,
+	}, RIGHT, -214, 3, 76, 24,
 		function() local sd = ns.get().auxSide; return (sd == "bottom" or sd == "top" or sd == "left" or sd == "right") and sd or "auto" end,
 		function(v) ns.get().auxSide = v end)
 	icons.add(side)
+	icons.adv(side, function() return ns.auxMode() ~= "free" end)
 	local alignLabel = p3:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-	alignLabel:SetPoint("TOPLEFT", RIGHT, -220)
+	alignLabel:SetPoint("TOPLEFT", RIGHT, -270)
 	alignLabel:SetText("Along that side:")
+	icons.adv(alignLabel, function() return ns.auxMode() ~= "free" end)
 	local align = radioGroup(p3, {
 		{ "start", "Start" }, { "center", "Middle" }, { "end", "End" },
-	}, RIGHT, -238, 3, 76, 24,
+	}, RIGHT, -288, 3, 76, 24,
 		function() local a = ns.get().auxAlign; return (a == "center" or a == "end") and a or "start" end,
 		function(v) ns.get().auxAlign = v end)
 	icons.add(align)
-	local nudgeX = icons.add(slider(p3, "Nudge left / right", "auxOffX", -100, 100, RIGHT, -270))
-	local nudgeY = icons.add(slider(p3, "Nudge up / down", "auxOffY", -100, 100, RIGHT, -323))
-
-	header(p3, "Own place", RIGHT, -374, COLW)
-	local ownX = icons.add(slider(p3, "Screen position left / right", "auxX", -1000, 1000, RIGHT, -400, nil, 5))
-	local ownY = icons.add(slider(p3, "Screen position up / down", "auxY", -600, 600, RIGHT, -453, nil, 5))
+	icons.adv(align, function() return ns.auxMode() ~= "free" end)
+	-- the nudges and the screen position share one spot: only the pair that applies shows
+	local nudgeX = icons.add(slider(p3, "Nudge left / right", "auxOffX", -100, 100, RIGHT, -322))
+	local nudgeY = icons.add(slider(p3, "Nudge up / down", "auxOffY", -100, 100, RIGHT, -375))
+	local ownX = icons.add(slider(p3, "Screen position left / right", "auxX", -1000, 1000, RIGHT, -322, nil, 5))
+	local ownY = icons.add(slider(p3, "Screen position up / down", "auxY", -600, 600, RIGHT, -375, nil, 5))
+	local attachedNow = function() return ns.auxMode() ~= "free" end
+	local freeNow = function() return ns.auxMode() == "free" end
+	icons.adv(nudgeX, attachedNow); icons.adv(nudgeY, attachedNow)
+	icons.adv(ownX, freeNow); icons.adv(ownY, freeNow)
 
 	local function iconDependents()
 		local on = ns.auxMode() ~= "free"
@@ -474,6 +535,7 @@ function ns.buildOptions()
 		enable(ownX, not on); enable(ownY, not on)
 		enable(unlockIcons, not on)
 		enableGroup(weaponMode, ns.get().weaponOn and true or false)   -- the choice only matters while the icon is on
+		icons.applyAdvanced()
 	end
 	for _, rb in ipairs(anchor.rbs) do rb:HookScript("OnClick", iconDependents) end
 	weaponBox:HookScript("OnClick", iconDependents)

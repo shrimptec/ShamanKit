@@ -24,33 +24,38 @@ function ns.buildCuresPage(ui)
 	local always = page.add(checkbox(p, "Keep the row on screen when nothing is on me", "cureAlways", LEFT, -274))
 	local click = page.add(checkbox(p, "Click a lit icon to cure myself", "cureClick", LEFT, -300))
 	local clickNote = note(p, "Casts that cure on you, in a fight too.", LEFT + 28, -328)
+	note(p, "To place the row, press Move on screen (top right).", LEFT, -356)
 
-	header(p, "Position of the row", LEFT, -372, COLW)
-	local unlock = page.add(checkbox(p, "Unlock the frames (the row shows here so you can drag it)", "locked", LEFT, -398,
+	-- advanced: dragging by hand, and what the addon found
+	page.adv(header(p, "Position of the row", LEFT, -396, COLW))
+	local unlock = page.adv(page.add(checkbox(p, "Unlock the frames (the row shows here so you can drag it)", "locked", LEFT, -422,
 		function() return ns.get().locked == false end,
-		function(v) ns.get().locked = not v end))
-	note(p, "The same lock as the totem bar's.", LEFT + 28, -426)
+		function(v) ns.get().locked = not v end)))
+	page.adv(note(p, "The same lock as the totem bar's.", LEFT + 28, -450))
 	local reset = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
 	reset:SetSize(150, 24)
-	reset:SetPoint("TOPLEFT", LEFT, -452)
+	reset:SetPoint("TOPLEFT", LEFT, -476)
 	reset:SetText("Reset position")
 	reset:SetScript("OnClick", function() ns.cureResetPosition() end)
-
-	header(p, "What it found", LEFT, -494, COLW)
-	local found = note(p, "", LEFT, -520)
+	page.adv(reset)
+	page.adv(header(p, "What it found", LEFT, -516, COLW))
+	local found = note(p, "", LEFT, -542)
 	found:SetWidth(COLW)
+	page.adv(found)
 
 	-- ---- right column: the look, and a test
 	header(p, "Look", RIGHT, -88, COLW)
 	local size = page.add(slider(p, "Row icon size", "cureSize", 24, 80, RIGHT, -114))
-	local spacing = page.add(slider(p, "Row spacing", "cureSpacing", 0, 24, RIGHT, -169))
-	local wash = page.add(checkbox(p, "Wash the icon in the colour", "cureWash", RIGHT, -224))
-	local washAlpha = page.add(slider(p, "Wash strength", "cureWashAlpha", 5, 80, RIGHT + 24, -252,
+	local spacing = page.add(slider(p, "Row spacing", "cureSpacing", 0, 24, RIGHT, -366))
+	local wash = page.add(checkbox(p, "Wash the icon in the colour", "cureWash", RIGHT, -169))
+	local washAlpha = page.add(slider(p, "Wash strength", "cureWashAlpha", 5, 80, RIGHT + 24, -419,
 		function(v) return v .. "%" end, 5))
-	local pulse = page.add(checkbox(p, "Pulse the border", "curePulse", RIGHT, -307))
-	local count = page.add(checkbox(p, "Show a number when there are several", "cureCount", RIGHT, -333))
+	local pulse = page.add(checkbox(p, "Pulse the border", "curePulse", RIGHT, -474))
+	local count = page.add(checkbox(p, "Show a number when there are several", "cureCount", RIGHT, -500))
+	page.adv(spacing); page.adv(washAlpha); page.adv(pulse); page.adv(count)
+	page.adv(header(p, "More of the look", RIGHT, -340, COLW))
 
-	header(p, "Test", RIGHT, -380, COLW)
+	header(p, "Test", RIGHT, -206, COLW)
 	local function testButton(label, key, x, y)
 		local b = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
 		b:SetSize(86, 24)
@@ -60,12 +65,12 @@ function ns.buildCuresPage(ui)
 		b.testKey = key
 		return b
 	end
-	testButton("Poison", "poison", RIGHT, -406)
-	testButton("Disease", "disease", RIGHT + 92, -406)
-	testButton("Curse", "curse", RIGHT + 184, -406)
-	testButton("All", "all", RIGHT, -438)
-	testButton("Clear", "clear", RIGHT + 92, -438)
-	note(p, "Lights them for a few seconds (out of combat), so you can see where and how.\nWhile this page is open they show anyway when nothing is on you.", RIGHT, -470)
+	testButton("Poison", "poison", RIGHT, -232)
+	testButton("Disease", "disease", RIGHT + 92, -232)
+	testButton("Curse", "curse", RIGHT + 184, -232)
+	testButton("All", "all", RIGHT, -262)
+	testButton("Clear", "clear", RIGHT + 92, -262)
+	note(p, "Lights them for a few seconds (out of combat), so you can see where and how.\nWhile this page is open they show anyway when nothing is on you.", RIGHT, -294)
 
 	-- what depends on what
 	local function dependents()
