@@ -24,6 +24,7 @@ ns.defaults = {
 	showOut = true,         -- red cross when out of range
 	rememberLast = true,    -- a placeholder shows the last totem that was out in that place (a chosen totem always wins)
 	leftCast = true,        -- left-click a place on the bar to cast the totem it shows (locked bar only)
+	rangeByBuff = true,     -- judge a buff totem by its buff when it can be read, and say "?" near the edge (off: your drop spot alone)
 	distanceMode = "bar",   -- how far you are from each totem: "bar" (room left in its radius), "yards" (exact number) or "off"
 	tint = true,
 	locked = true,
@@ -421,20 +422,30 @@ local function rangeOf(slot, now)
 	now = now or playerPos()
 	local was = s.at
 	local r, how, dist, byPos
+	local smart = db.rangeByBuff ~= false            -- the setting; also what a damaged value means
+	local function judge(d)                          -- smart: only a clear answer; off: the plain radius
+		if smart then return fromDistance(d, s.range) end
+		return d <= s.range
+	end
 	if was and was.ux and now.ux and now.umap == was.umap then
 		local dx, dy = now.ux - was.ux, now.uy - was.uy
 		dist = math.sqrt(dx * dx + dy * dy)
-		byPos, how = fromDistance(dist, s.range), "position"
+		byPos, how = judge(dist), "position"
 	else
 		if not now.mapRead then readMapPos(now) end   -- the yard position could not answer: ask the map
 		if was and was.mx and now.mx and now.mapID == was.mapID then
 			local dx, dy = (now.mx - was.mx) * now.mw, (now.my - was.my) * now.mh
 			dist = math.sqrt(dx * dx + dy * dy)
-			byPos, how = fromDistance(dist, s.range), "map position"
+			byPos, how = judge(dist), "map position"
 		end
 	end
-	local buff = fromBuff(s)
-	if buff == false and s.t and GetTime() - s.t < BUFF_GRACE then buff = nil end   -- just dropped: the buff is not on yet
+	local buff
+	if smart then
+		buff = fromBuff(s)
+		if buff == false and s.t and GetTime() - s.t < BUFF_GRACE then buff = nil end   -- just dropped: the buff is not on yet
+	elseif not how and s.aura then
+		buff = hasAura(s.aura)                       -- off: the buff is only the stand-in when no position can be read
+	end
 	if buff ~= nil then
 		r, how = buff, "buff"
 		if dist then                                      -- keep the number and the answer consistent

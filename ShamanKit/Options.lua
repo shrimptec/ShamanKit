@@ -209,7 +209,7 @@ function ns.buildOptions()
 	-- ------------------------------------------------------------ page 1: the totem bar
 	local main = newPage("Totem bar", "Totem bar",
 		"Your active totems, how long they have left, and whether you are in range of each.",
-		{ "size", "spacing", "vertical", "showTimer", "showRange", "showOut", "tint", "distanceMode", "attach", "attachX", "attachY", "locked" })
+		{ "size", "spacing", "vertical", "showTimer", "showRange", "showOut", "tint", "distanceMode", "rangeByBuff", "attach", "attachX", "attachY", "locked" })
 	local p1 = main.panel
 
 	header(p1, "Totem icons", LEFT, -88, COLW)
@@ -248,6 +248,10 @@ function ns.buildOptions()
 	reset:SetPoint("TOPLEFT", RIGHT, -312)
 	reset:SetText("Reset position")
 	reset:SetScript("OnClick", function() ns.resetPosition(); main.refresh() end)
+
+	header(p1, "Range accuracy", RIGHT, -354, COLW)
+	main.add(checkbox(p1, "Watch the totem's buff", "rangeByBuff", RIGHT, -380))
+	note(p1, "A totem lands a little to one side of you, so your\nposition is only a guess. On: a buff totem is judged by\nits buff when the game lets addons see it, and close to\nthe edge the mark is a yellow ? instead of a guess.", RIGHT + 28, -408)
 
 	-- offsets only matter while attached; dragging only while detached (the small icons can be dragged on their own)
 	local function mainDependents()

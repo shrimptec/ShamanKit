@@ -1270,6 +1270,51 @@ do
 	check(tips[#tips] and tostring(tips[#tips]):find("near the edge") and tostring(tips[#tips]):find("Range unknown") == nil, "range: the tooltip says 'near the edge' (" .. tostring(tips[#tips]) .. ")")
 	AURAS_HIDDEN = false; inCombat = false
 
+	-- the setting: on by default, and off is exactly the old way (your drop spot alone, a hard cutoff)
+	check(ns.defaults.rangeByBuff == true, "range setting: on by default")
+	ShamanKitDB.rangeByBuff = false
+	BUFF_READS = true; AURAS_HIDDEN = false; inCombat = false
+	auras["Strength of Earth"] = {}
+	place(2, "Strength of Earth Totem IV")
+	calls = 0
+	at(40)
+	check(mark(2) == "out", "range setting off: 40 yd by position is out, whatever the buff says")
+	at(27)
+	check(mark(2) == "in", "range setting off: 27 yd is in (no uncertain band)")
+	at(31)
+	check(mark(2) == "out", "range setting off: 31 yd is out (a hard cutoff at 30, no ?)")
+	check(calls == 0, "range setting off: the buff is not read while there is a position (" .. calls .. ")")
+	check(btn(2).dist.text == "31.0 yd", "range setting off: the real number, not adjusted (" .. tostring(btn(2).dist.text) .. ")")
+	auras["Strength of Earth"] = nil
+	at(5)
+	check(mark(2) == "in", "range setting off: no buff, 5 yd: in (the position decides)")
+	-- no position at all: the buff is the stand-in, as it always was (and no waiting for the buff to arrive)
+	auras["Strength of Earth"] = nil
+	place(2, "Strength of Earth Totem IV")
+	pos = nil; t = t + 0.1; tick()
+	check(mark(2) == "out", "range setting off: no position, no buff, just dropped: out (the old way does not wait for the buff)")
+	auras["Strength of Earth"] = {}; t = t + 1; tick()
+	check(mark(2) == "in", "range setting off: no position, buff there: in")
+	-- a damaged saved value counts as on
+	ShamanKitDB.rangeByBuff = "maybe"
+	place(2, "Strength of Earth Totem IV")
+	auras["Strength of Earth"] = {}
+	calls = 0
+	at(31)
+	check(mark(2) == "in" and calls > 0, "range setting damaged: treated as on (the buff is read and decides)")
+	ShamanKitDB.rangeByBuff = true
+	-- the settings page
+	local page = savedCat.pages[2]
+	local box
+	for _, f in ipairs(frames) do if f.settingKey == "rangeByBuff" and f.parentFrame == page then box = f end end
+	check(box ~= nil, "range setting: a box on the Totem bar page")
+	page.OnRefresh()
+	check(box.checked == true, "range setting: it shows on")
+	box:SetChecked(false); box.scripts.OnClick(box)
+	check(ShamanKitDB.rangeByBuff == false, "range setting: unticking switches it off")
+	page.OnDefault()
+	check(ShamanKitDB.rangeByBuff == true, "range setting: Defaults on this page turns it back on")
+
 	C_UnitAuras.GetAuraDataBySpellName = real
 	clear(); ShamanKitDB.distanceMode = "bar"; ShamanKitDB.log = {}
 end
