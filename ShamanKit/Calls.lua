@@ -216,6 +216,7 @@ end
 -- ---------------------------------------------------------------- the buttons
 
 local function tooltipOf(self)
+	if S.up == false then return end                -- faded out with the totem bar: nothing to describe
 	GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
 	local done = false
 	if self.spellId and GameTooltip.SetSpellByID then done = pcall(GameTooltip.SetSpellByID, GameTooltip, self.spellId) end
@@ -388,6 +389,7 @@ local function openFlyout()
 end
 
 local function toggleFlyout()
+	if S.up == false then return end                -- the arrow is faded out with the rest
 	if S.flyout and S.flyout:IsShown() then closeFlyout() else openFlyout() end
 end
 
@@ -403,6 +405,7 @@ local function newArrow()
 	hl:SetBlendMode("ADD")
 	a:SetScript("OnClick", guard("call arrow", toggleFlyout))
 	a:SetScript("OnEnter", guard("call arrow tip", function(self)
+		if S.up == false then return end
 		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
 		GameTooltip:SetText("Choose the Call spell")
 		if InCombatLockdown() then GameTooltip:AddLine("Not in a fight.", 1, 0.5, 0.5) end
@@ -481,7 +484,7 @@ end
 local SIG_FIELDS = { "Anchor", "Side", "Align", "OffX", "OffY", "Point", "RelPoint", "X", "Y" }
 local function signature(kinds, side)
 	local parts = { tostring(db.callShow), tostring(db.callScale),
-		tostring(db.size), tostring(db.spacing), tostring(db.vertical), tostring(db.locked), tostring(side), tostring(visibleNow()) }
+		tostring(db.size), tostring(db.spacing), tostring(db.vertical), tostring(db.locked), tostring(side) }
 	for _, pfx in ipairs({ "call", "posCall", "posTotemic", "posRecall" }) do
 		for _, f in ipairs(SIG_FIELDS) do parts[#parts + 1] = tostring(db[pfx .. f]) end
 	end
@@ -492,8 +495,27 @@ local function signature(kinds, side)
 	return table.concat(parts, "|")
 end
 
--- Log what the Call buttons decide and why (information only), once per change: a button that stays on screen with no totem
--- out has to be explainable from the log. "wants" is what the settings and the bar say, "is" what is on screen.
+-- Showing and hiding the buttons is not allowed in a fight (they are secure buttons), but changing how see-through they are
+-- is. So the group stays shown and only fades: invisible (and silent) while there is no totem bar, fully visible while there
+-- is, in a fight too. The buttons keep their mouse on, because that cannot be switched in a fight either: an invisible
+-- button still takes a click where it sits (the tooltip is held back).
+local function refreshAlpha()
+	local g = S.group
+	if not g or not db then return end
+	local up = visibleNow() and true or false
+	S.up = up
+	if not up then closeFlyout() end                 -- the pick list goes with the buttons
+	if S.alphaApplied == up then return end
+	local ok, err = pcall(g.SetAlpha, g, up and 1 or 0)
+	if ok then S.alphaApplied = up
+	else
+		S.alphaApplied = nil
+		if not S.alphaErr then S.alphaErr = true; dbg("CALLS could not fade the buttons (combat=%s): %s", tostring(InCombatLockdown()), tostring(err):sub(1, 80)) end
+	end
+end
+ns.callAlpha = refreshAlpha
+
+-- Log what the Call buttons decide and why (information only), once per change.
 local function reason()
 	return ("barUp=%s optionsOpen=%s moveMode=%s callShow=%s combat=%s"):format(tostring(ns.barUp and ns.barUp()),
 		tostring(ns.optionsOpen), tostring(ns.moveMode), tostring(db.callShow), tostring(InCombatLockdown()))
@@ -501,7 +523,7 @@ end
 local function watch(where)
 	local g = S.group
 	if not g then return end
-	local is = g:IsShown() and true or false
+	local is = (g:IsShown() and S.alphaApplied) and true or false
 	local wants = ((S.shown and #S.shown > 0) and visibleNow()) and true or false
 	local key = tostring(is) .. tostring(wants)
 	if key == S.watchKey then return end
@@ -513,9 +535,11 @@ end
 -- the whole pass: which buttons, what they cast, how big, where they sit, whether they are on screen
 local function apply()
 	if not db then return end
-	if InCombatLockdown() then S.pending = true watch("waiting for the end of the fight") return end
+	refreshAlpha()                                       -- allowed in a fight: appear / disappear with the totem bar at once
+	if InCombatLockdown() then S.pending = true watch("in a fight") return end
 	S.pending = false
 	if not ensure() then return end
+	refreshAlpha()
 	S.choices = knownCalls()
 	local call = chosenCall(S.choices)
 
@@ -558,7 +582,7 @@ local function apply()
 			place(b, pfx, bside)
 		end
 		arm(b, (not dragging(pfx)) and name or nil)       -- a press that starts a drag must not cast
-		b:EnableMouse(show)
+		b:EnableMouse(true)                              -- not switchable in a fight: always on, the group fades instead
 		b:Show()
 	end
 	for kind, b in pairs(S.buttons) do
@@ -579,7 +603,8 @@ local function apply()
 	local long = math.max(grouped, 1) * s + math.max(grouped - 1, 0) * gap
 	if vertical then g:SetSize(s, long) else g:SetSize(long, s) end
 	place(g, "call", side)
-	g:SetShown(n > 0 and show)
+	g:SetShown(n > 0)
+	refreshAlpha()
 	watch("applied")
 
 	-- the arrow: only on the Call button, and only when there is something to choose

@@ -20,7 +20,7 @@ Small helpers for shamans, for World of Warcraft: Forever, in the default UI sty
   sit on top of each other turn red and are named. Moving something that sat on the bar or the player frame gives it a
   place of its own. It is for out of combat only, and a fight ends it.
 - **Call spells**: optional buttons at the totem bar (any side, any alignment, nudge and size are settings) or in a place of
-  their own that you drag, shown all the time or only while a totem is out (and each button can be given a position
+  their own that you drag, shown all the time or only while a totem is out (they appear and fade with the totem bar at once, also in a fight; while faded out they are invisible but still take a click where they sit) (and each button can be given a position
   of its own, apart from the others): one for Call of the Elements /
   Ancestors / Spirits with a small arrow to pick which, like the default totem bar, plus Totemic Call and Totemic
   Recall. Each is its own option (all off until you switch them on), and each only shows when you know the spell. In a

@@ -1581,46 +1581,85 @@ do
 	at("start", "start")
 
 	-- showing: all the time, or only while a totem is out
-	local function pair() return S.group.shown, b1.mouse end
+	-- the group stays shown and only fades: showing / hiding secure buttons is not allowed in a fight, a fade is
+	local function seen() return S.group.shown == true and (S.group.alpha == nil or S.group.alpha > 0) end
+	local function pair() return seen(), b1.mouse end
 	db.callShow = "always"; ns.callApply()
 	local sh, mo = pair()
 	check(sh == true and mo == true, "calls show: 'all the time': on screen with no totem out")
 	db.callShow = "bar"; ns.callApply()
 	sh, mo = pair()
-	check(sh == false and mo == false, "calls show: 'only while a totem is out', none out: hidden and nothing takes a click")
+	check(sh == false and S.group.shown == true and S.group.alpha == 0, "calls show: 'only while a totem is out', none out: faded out, not hidden")
 	totems[2] = { name = "Strength of Earth Totem IV", start = t, dur = 300, icon = 99 }
 	fire("PLAYER_TOTEM_UPDATE", 2)
 	sh, mo = pair()
-	check(sh == true and mo == true, "calls show: a totem comes out: the buttons appear")
+	check(sh == true and mo == true and S.group.alpha == 1, "calls show: a totem comes out: the buttons appear")
 	totems[2] = nil
 	fire("PLAYER_TOTEM_UPDATE", 2)
 	sh, mo = pair()
-	check(sh == false and mo == false, "calls show: it is gone: the buttons go too")
+	check(sh == false and S.group.alpha == 0, "calls show: it is gone: the buttons fade out too")
 	ns.optionsOpen = true; ns.updatePreview()
-	check(S.group.shown == true, "calls show: a settings page open shows them (so you can set them up)")
+	check(seen() == true, "calls show: a settings page open shows them (so you can set them up)")
 	ns.optionsOpen = false; ns.updatePreview()
-	check(S.group.shown == false, "calls show: ...and closing it hides them again")
+	check(seen() == false, "calls show: ...and closing it fades them again")
+	-- faded out: the invisible button and arrow are silent (no tooltip, no pick list); fade failing in a fight is logged
+	do
+		local owners = 0
+		local oSet = GameTooltip.SetOwner
+		rawset(GameTooltip, "SetOwner", function(...) owners = owners + 1; return oSet(...) end)
+		b1.scripts.OnEnter(b1)
+		S.arrow.scripts.OnEnter(S.arrow)
+		S.arrow.scripts.OnClick(S.arrow)
+		check(owners == 0 and not (S.flyout and S.flyout:IsShown()), "calls show: faded out: no tooltip and no pick list from the invisible buttons")
+		totems[2] = { name = "Strength of Earth Totem IV", start = t, dur = 300, icon = 99 }
+		fire("PLAYER_TOTEM_UPDATE", 2)
+		b1.scripts.OnEnter(b1)
+		check(owners > 0, "calls show: shown: the tooltip comes back")
+		S.arrow.scripts.OnClick(S.arrow)
+		local opened = S.flyout and S.flyout:IsShown()
+		totems[2] = nil
+		fire("PLAYER_TOTEM_UPDATE", 2)
+		check(not (S.flyout and S.flyout:IsShown()), "calls show: the pick list goes when the buttons fade (it was " .. tostring(opened) .. ")")
+		rawset(GameTooltip, "SetOwner", nil)
+		local oAlpha = S.group.SetAlpha
+		rawset(S.group, "SetAlpha", function() error("blocked") end)
+		S.alphaErr, S.alphaApplied = nil, nil
+		totems[2] = { name = "Strength of Earth Totem IV", start = t, dur = 300, icon = 99 }
+		local okb = pcall(fire, "PLAYER_TOTEM_UPDATE", 2)
+		local logged = false
+		for _, l in ipairs(ShamanKitLogDB.lines) do if l:find("CALLS could not fade the buttons") then logged = true end end
+		check(okb and logged, "calls show: a fade the game refuses is logged, never thrown")
+		rawset(S.group, "SetAlpha", nil)
+		totems[2] = nil; fire("PLAYER_TOTEM_UPDATE", 2); S.alphaErr = nil
+	end
 	-- a totem comes out in a fight: nothing is touched until it is over
 	local gw = 0
 	for _, f in ipairs({ S.group }) do local o = f.SetShown; rawset(f, "SetShown", function(self, v) gw = gw + 1; return o(self, v) end) end
+	local mw = 0
+	for _, b in ipairs({ b1, b2, b3 }) do
+		for _, m in ipairs({ "EnableMouse", "Show", "Hide", "SetPoint", "SetAttribute" }) do
+			local o = b[m]; rawset(b, m, function(...) mw = mw + 1; return o(...) end)
+		end
+	end
 	inCombat = true
 	totems[2] = { name = "Strength of Earth Totem IV", start = t, dur = 300, icon = 99 }
 	local okf = pcall(fire, "PLAYER_TOTEM_UPDATE", 2)
-	check(okf and gw == 0 and S.group.shown == false, "calls show fight: a totem out in a fight: no error, the group is not touched")
+	check(okf and gw == 0 and mw == 0 and seen() == true, "calls show fight: a totem out in a fight: the buttons appear AT ONCE, nothing secure is touched (" .. gw .. ", " .. mw .. ")")
 	inCombat = false
 	cfire("PLAYER_REGEN_ENABLED"); fire("PLAYER_REGEN_ENABLED"); runTimers()
-	check(S.group.shown == true, "calls show fight: after it the buttons appear")
+	check(seen() == true, "calls show fight: and they are still there after the fight")
 	inCombat = true
 	totems[2] = nil
 	pcall(fire, "PLAYER_TOTEM_UPDATE", 2)
-	check(S.group.shown == true and gw == 1, "calls show fight: the totem expiring in a fight: the buttons stay until it is over")
+	check(seen() == false and S.group.shown == true and gw == 0 and mw == 0, "calls show fight: the totem expiring in a fight: the buttons fade out AT ONCE, nothing secure is touched")
 	local function callLog(pat) for _, l in ipairs(ShamanKitLogDB.lines) do if l:find(pat) then return l end end end
-	check(callLog("CALLS group IS on screen but WANTS hidden %(waiting for the end of the fight%)") ~= nil, "calls log: a button that has to wait for the end of the fight says so")
+	check(callLog("CALLS group hidden %(in a fight%) | barUp=false") ~= nil, "calls log: the fade in a fight is logged with its reason")
 	inCombat = false
 	cfire("PLAYER_REGEN_ENABLED"); fire("PLAYER_REGEN_ENABLED"); runTimers()
-	check(S.group.shown == false, "calls show fight: ...then they go")
+	check(seen() == false, "calls show fight: ...and stay faded after it")
 	check(callLog("CALLS group hidden %(applied%) | barUp=false") ~= nil, "calls log: ...and the log says they are hidden, and why")
 	rawset(S.group, "SetShown", nil)
+	for _, b in ipairs({ b1, b2, b3 }) do for _, m in ipairs({ "EnableMouse", "Show", "Hide", "SetPoint", "SetAttribute" }) do rawset(b, m, nil) end end
 	db.callShow = "always"; ns.callApply()
 	check(S.group.shown == true, "calls show: back to all the time")
 	db.callShow = "whenever"; ns.callApply()
@@ -1727,9 +1766,9 @@ do
 		db.shieldOn = false; db.auxSide = "auto"
 		-- showing follows the same rule as the others
 		db.callShow = "bar"; ns.callApply()
-		check(S.group.shown == false and b2.mouse == false, "calls own: 'only while a totem is out': the one on its own goes too")
+		check(S.group.alpha == 0 and b2.shown == true, "calls own: 'only while a totem is out': the one on its own fades too")
 		db.callShow = "always"; ns.callApply()
-		check(b2.shown == true and b2.mouse == true and S.group.shown == true, "calls own: ...and comes back")
+		check(b2.shown == true and b2.mouse == true and S.group.shown == true and S.group.alpha == 1, "calls own: ...and comes back")
 		-- when only buttons on their own are on, the group still shows them
 		db.callOn = false; db.callRecall = false; ns.callApply()
 		check(b2.shown and S.group.shown, "calls own: only buttons on their own: they still show")
