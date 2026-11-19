@@ -50,7 +50,7 @@ function ns.migrate(d)
 	if d.showRange == false and d.showOut == nil then d.showOut = false end   -- the old single switch hid both marks
 	if d.auxAnchor == nil then d.auxAnchor = (d.auxAttached == false) and "free" or "bar" end   -- "attached or not" became bar / player frame / own place
 	d.auxAttached = nil
-	d.buffBadge = true   -- 0.24: the game-drawn buff is always on; buffFollow (default true) picks red/bright icon or corner picture
+	d.buffBadge, d.buffFollow = true, false   -- 0.25: the buff's corner picture is always on; the red/bright "follow" mode did not work in the real game and is retired
 end
 
 local isSecret = issecretvalue or function() return false end
