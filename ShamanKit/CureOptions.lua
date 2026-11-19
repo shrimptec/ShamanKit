@@ -10,7 +10,7 @@ function ns.buildCuresPage(ui)
 
 	local page = newPage("Cures", "Cures",
 		"Your cure spells light up, in the colour of what is on you, while a debuff they can remove is on you. Works in a fight too.",
-		{ "cureOn", "cureBars", "cureRow", "cureAlways", "cureSize", "cureSpacing", "cureWash", "cureWashAlpha", "curePulse", "cureCount" })
+		{ "cureOn", "cureBars", "cureRow", "cureAlways", "cureSize", "cureSpacing", "cureWash", "cureWashAlpha", "curePulse", "cureCount", "cureClick" })
 	local p = page.panel
 
 	-- ---- left column: what and where
@@ -22,20 +22,22 @@ function ns.buildCuresPage(ui)
 	local bars = page.add(checkbox(p, "On my action bar buttons", "cureBars", LEFT, -222))
 	local row = page.add(checkbox(p, "In a small icon row", "cureRow", LEFT, -248))
 	local always = page.add(checkbox(p, "Keep the row on screen when nothing is on me", "cureAlways", LEFT, -274))
+	local click = page.add(checkbox(p, "Click a lit icon to cure myself", "cureClick", LEFT, -300))
+	local clickNote = note(p, "Casts that cure on you, in a fight too. Needs the frames locked.", LEFT + 28, -328)
 
-	header(p, "Position of the row", LEFT, -316, COLW)
-	local unlock = page.add(checkbox(p, "Unlock the frames (drag the row to move it)", "locked", LEFT, -342,
+	header(p, "Position of the row", LEFT, -372, COLW)
+	local unlock = page.add(checkbox(p, "Unlock the frames (drag the row to move it)", "locked", LEFT, -398,
 		function() return ns.get().locked == false end,
 		function(v) ns.get().locked = not v end))
-	note(p, "The same lock as the totem bar's.", LEFT + 28, -370)
+	note(p, "The same lock as the totem bar's.", LEFT + 28, -426)
 	local reset = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
 	reset:SetSize(150, 24)
-	reset:SetPoint("TOPLEFT", LEFT, -396)
+	reset:SetPoint("TOPLEFT", LEFT, -452)
 	reset:SetText("Reset position")
 	reset:SetScript("OnClick", function() ns.cureResetPosition() end)
 
-	header(p, "What it found", LEFT, -438, COLW)
-	local found = note(p, "", LEFT, -464)
+	header(p, "What it found", LEFT, -494, COLW)
+	local found = note(p, "", LEFT, -520)
 	found:SetWidth(COLW)
 
 	-- ---- right column: the look, and a test
@@ -71,6 +73,9 @@ function ns.buildCuresPage(ui)
 		local rowOn = d.cureRow and true or false
 		enable(always, rowOn); enable(size, rowOn); enable(spacing, rowOn); enable(count, rowOn)
 		enable(unlock, rowOn)
+		enable(click, rowOn and d.locked ~= false)
+		clickNote:SetText(d.locked == false and "The frames are unlocked, so clicking is off until you lock them."
+			or "Casts that cure on you, in a fight too. Needs the frames locked.")
 		enable(washAlpha, d.cureWash and true or false)
 		local state = ns.cureState
 		if state and state.conflict then
@@ -80,7 +85,7 @@ function ns.buildCuresPage(ui)
 		end
 		found:SetText(table.concat(ns.cureInfo and ns.cureInfo() or {}, "\n"))
 	end
-	for _, c in ipairs({ row, wash, on, bars }) do c:HookScript("OnClick", dependents) end
+	for _, c in ipairs({ row, wash, on, bars, unlock }) do c:HookScript("OnClick", dependents) end
 	page.after[#page.after + 1] = dependents
 
 	-- the preview is only while THIS page is open

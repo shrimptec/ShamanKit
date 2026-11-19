@@ -1438,6 +1438,99 @@ do
 	inCombat = false; both("PLAYER_REGEN_ENABLED"); settle()
 	check(S.rowSlots.poison.parts.icon.alpha == 1, "cures: after the fight it is right again")
 
+	-- ------------------------------------------------ click a lit row icon to cure yourself
+	do
+		db.cureClick = true; db.locked = true; db.cureOn = true; db.cureRow = true; db.cureBars = true
+		S.knownDirty = true; ns.cureApply()
+		local function clickOf(key) return S.rowSlots[key] and S.rowSlots[key].click end
+		local cp, cd, cc = clickOf("poison"), clickOf("disease"), clickOf("curse")
+		check(cp and cd and cc, "cures click: every row icon has a secure button")
+		check(cp.tmpl == "SecureActionButtonTemplate" and cp.parentFrame == S.rowSlots.poison.button, "cures click: it is a secure button, a child of the game's icon (so it is only there while the icon is)")
+		check(cp.attrs.type1 == "spell" and cp.attrs.spell1 == "Cure Poison" and cp.attrs.unit1 == "player", "cures click: left-click casts Cure Poison on you")
+		check(cd.attrs.spell1 == "Cure Disease" and cc.attrs.spell1 == "Shatter Curse", "cures click: each icon casts its own cure")
+		check(cp.mouse == true and cp.shown == true, "cures click: the button takes the mouse, and the addon never hides it (the game's icon does)")
+		check(S.assigned[btn(3)].click == nil, "cures click: the overlays on your action buttons stay plain (the real button there already casts)")
+		check(lines("CURES click: poison cast Cure Poison on you") == 1, "cures click: the log says what each icon casts")
+		-- the tooltip
+		cp.scripts.OnEnter(cp)
+		check(GameTooltip.text == "Cure Poison", "cures click: the tooltip names the cure")
+
+		-- off
+		db.cureClick = false; ns.cureApply()
+		check(cp.attrs.type1 == nil and cp.attrs.spell1 == nil and cp.mouse == false, "cures click: switched off: nothing is cast and the mouse passes through")
+		db.cureClick = true; ns.cureApply()
+		check(cp.attrs.spell1 == "Cure Poison" and cp.mouse == true, "cures click: switched on again")
+		-- unlocked: the row is for dragging
+		db.locked = false; ns.cureApply()
+		check(cp.attrs.type1 == nil and cp.mouse == false, "cures click: unlocked: clicking is off (the row is being moved)")
+		db.locked = true; ns.cureApply()
+		check(cp.attrs.spell1 == "Cure Poison", "cures click: locked again")
+		-- a cure you do not have
+		CURE_KNOWN[526] = nil; S.knownDirty = true; ns.cureApply()
+		check(cp.attrs.type1 == nil and cp.mouse == false, "cures click: a cure you don't have casts nothing")
+		CURE_KNOWN[526] = true; S.knownDirty = true; ns.cureApply()
+		check(cp.attrs.spell1 == "Cure Poison", "cures click: and is back when you learn it")
+		-- the row off, the module off
+		db.cureRow = false; ns.cureApply()
+		check(cp.attrs.type1 == nil and cp.mouse == false, "cures click: row off: no click")
+		db.cureRow = true; ns.cureApply()
+		check(cp.attrs.spell1 == "Cure Poison", "cures click: row on")
+		db.cureOn = false; ns.cureApply()
+		check(cp.attrs.type1 == nil and cp.mouse == false, "cures click: module off: no click")
+		db.cureOn = true; ns.cureApply()
+		-- a rename (the spell's name in another language, or after an update)
+		C_Spell.GetSpellInfo = (function(orig) return function(id) local i = orig(id); if id == 526 and RENAMED then i = { name = RENAMED, iconID = i and i.iconID } end return i end end)(C_Spell.GetSpellInfo)
+		RENAMED = "Gift Heilen"; S.knownDirty = true; ns.cureApply()
+		check(cp.attrs.spell1 == "Gift Heilen", "cures click: the spell is cast by the name this client uses")
+		RENAMED = nil; S.knownDirty = true; ns.cureApply()
+
+		-- a fight: nothing on the secure button is touched (the game would refuse and show a popup)
+		local setWrites = 0
+		for _, c in ipairs({ cp, cd, cc }) do
+			local orig = c.SetAttribute
+			rawset(c, "SetAttribute", function(self, k, v) setWrites = setWrites + 1; return orig(self, k, v) end)
+		end
+		inCombat = true; AURAS_HIDDEN = true; both("PLAYER_REGEN_DISABLED")
+		db.cureClick = false; db.locked = false; db.cureOn = false
+		local okf, errf = pcall(function() ns.updatePreview(); both("SPELLS_CHANGED"); cfire("ACTIONBAR_SLOT_CHANGED", 3); cfire("UNIT_AURA", "player"); settle() end)
+		check(okf, "cures click fight: settings changed in a fight raise no error (" .. tostring(errf) .. ")")
+		check(setWrites == 0 and cp.attrs.spell1 == "Cure Poison" and cp.mouse == true, "cures click fight: the secure buttons are left exactly as they were")
+		inCombat = false; AURAS_HIDDEN = false; both("PLAYER_REGEN_ENABLED"); settle()
+		check(cp.attrs.type1 == nil and cp.mouse == false and setWrites > 0, "cures click fight: and the changes are made once it is over")
+		for _, c in ipairs({ cp, cd, cc }) do rawset(c, "SetAttribute", nil) end
+		db.cureClick = true; db.locked = true; db.cureOn = true; ns.cureApply()
+		check(cp.attrs.spell1 == "Cure Poison", "cures click: back to normal")
+
+		-- CureWatch still installed: the module is off, so is the click
+		local realLoaded2 = C_AddOns.IsAddOnLoaded
+		C_AddOns.IsAddOnLoaded = function(n) if n == "CureWatch" then return true end return realLoaded2(n) end
+		local realPrint2 = print; print = function() end
+		ns.cureInit(); print = realPrint2
+		ns.cureApply()
+		check(cp.attrs.type1 == nil and cp.mouse == false, "cures click: CureWatch installed: no click")
+		C_AddOns.IsAddOnLoaded = realLoaded2
+		ns.cureInit(); ns.cureApply()
+		check(cp.attrs.spell1 == "Cure Poison", "cures click: CureWatch gone: back")
+
+		-- the game refuses to make a secure child: the icon still works, the log says why, nothing raises
+		local realCF = CreateFrame
+		db.log = {}
+		S.container, S.failed, S.rowSlots, S.pools, S.assigned = nil, false, {}, {}, {}
+		function CreateFrame(kind, name, parent, tmpl)
+			if tmpl == "SecureActionButtonTemplate" then error("secure frames can't be made here") end
+			return realCF(kind, name, parent, tmpl)
+		end
+		local okc, errc = pcall(ns.cureApply)
+		CreateFrame = realCF
+		check(okc, "cures click: no secure child allowed: no error (" .. tostring(errc) .. ")")
+		check(S.rowSlots.poison and S.rowSlots.poison.click == nil and S.rowSlots.poison.button ~= nil, "cures click: the lit icon itself is still made")
+		check(lines("CURES click: no secure button for poison") == 1, "cures click: the log says it could not be made")
+		S.container, S.rowSlots, S.pools, S.assigned = nil, {}, {}, {}
+		S.knownDirty = true; ns.cureApply()
+		check(S.rowSlots.poison.click ~= nil and S.rowSlots.poison.click.attrs.spell1 == "Cure Poison", "cures click: next time it is made fine")
+		db.log = {}
+	end
+
 	-- ------------------------------------------------ no container on this client: plain frames lit by the reading
 	for _, rec in pairs(S.rowSlots) do rec.on = false end
 	S.container, S.failed, S.rowSlots, S.pools, S.assigned = nil, false, {}, {}, {}
@@ -1487,7 +1580,7 @@ do
 	local page = savedCat.pages[5]                   -- a page is its panel
 	check(page ~= nil, "cures settings: it is the fifth page (home, totem bar, totems, buffs, cures)")
 	local function boxFor(key) for _, f in ipairs(frames) do if f.settingKey == key and f.parentFrame == page then return f end end end
-	for _, key in ipairs({ "cureOn", "cureBars", "cureRow", "cureAlways", "cureWash", "curePulse", "cureCount" }) do
+	for _, key in ipairs({ "cureOn", "cureBars", "cureRow", "cureAlways", "cureWash", "curePulse", "cureCount", "cureClick" }) do
 		check(boxFor(key) ~= nil, "cures settings: a box for " .. key)
 	end
 	page.OnRefresh()
@@ -1497,11 +1590,12 @@ do
 	rowBox:SetChecked(false); rowBox.scripts.OnClick(rowBox)
 	check(db.cureRow == false and parked(poi), "cures settings: unticking the row switches it off at once")
 	check(alwaysBox.enabled == false, "cures settings: ...and greys out what only matters for the row")
+	check(boxFor("cureClick").enabled == false, "cures settings: ...including the click box")
 	rowBox:SetChecked(true); rowBox.scripts.OnClick(rowBox)
 	check(db.cureRow == true and alwaysBox.enabled == true and poi.anchor[2] == S.cells.poison, "cures settings: ticking it brings it back")
-	db.cureWashAlpha = 77; db.cureSize = 70; db.cureOn = false
+	db.cureWashAlpha = 77; db.cureSize = 70; db.cureOn = false; db.cureClick = false
 	page.OnDefault()
-	check(db.cureOn == true and db.cureWashAlpha == 30 and db.cureSize == 36, "cures settings: Defaults restores this page's settings")
+	check(db.cureOn == true and db.cureWashAlpha == 30 and db.cureSize == 36 and db.cureClick == true, "cures settings: Defaults restores this page's settings (the click too)")
 	page.scripts.OnShow()
 	check(ns.curesPageOpen == true, "cures settings: opening the page turns the preview on")
 	page.scripts.OnHide()

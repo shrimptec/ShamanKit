@@ -39,6 +39,7 @@ D.cureWash = true           -- a wash of the affliction's colour over the icon
 D.cureWashAlpha = 30        -- percent
 D.curePulse = true
 D.cureCount = true          -- a number on the row icon when the debuff has several stacks
+D.cureClick = true          -- click a lit row icon to cast that cure on yourself
 D.curePoint, D.cureRelPoint, D.cureX, D.cureY = "CENTER", "CENTER", 0, -160
 
 local function clamp(v, lo, hi, def)
@@ -288,6 +289,67 @@ local function makeContainer()
 	return S.container
 end
 
+-- ---------------------------------------------------------------- click to cure
+
+-- A secure button as a CHILD of the game's slot frame. The game shows and hides that frame when a matching debuff comes
+-- and goes, in a fight too, and a child is only on screen (and only takes the mouse) while its parent is: so the button
+-- is there to click exactly when the icon is, with nothing for the addon to show or hide in combat. It is made here, when
+-- the slot is made (out of combat), and its spell is set out of combat only (armClick). The game does the casting.
+local function tipOf(self)
+	local name = self.spellName
+	if not name then return end
+	GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+	GameTooltip:SetText(name)
+	GameTooltip:AddLine("Click to cast it on yourself.", 1, 1, 1)
+	GameTooltip:Show()
+end
+
+local function makeClick(button, cure)
+	local ok, b = pcall(CreateFrame, "Button", nil, button, "SecureActionButtonTemplate")
+	if not ok or not b then
+		dbg("CURES click: no secure button for %s (%s)", cure.key, short(b))
+		return nil
+	end
+	local okAll, err = pcall(function()
+		b:SetAllPoints(button)
+		b:SetFrameLevel((button:GetFrameLevel() or 1) + 12)
+		b:RegisterForClicks("LeftButtonUp")
+		b:EnableMouse(false)                           -- off until armed
+		b:SetScript("OnEnter", guard("cure click tooltip", tipOf))
+		b:SetScript("OnLeave", GameTooltip_Hide)
+		local hl = b:CreateTexture(nil, "HIGHLIGHT")
+		hl:SetAllPoints()
+		hl:SetTexture(WHITE)
+		hl:SetVertexColor(1, 1, 1, 0.18)
+	end)
+	if not okAll then dbg("CURES click: the button for %s could not be set up (%s)", cure.key, short(err)) end
+	return b
+end
+
+-- out of combat only: the spell (cast on you), and the mouse
+local function armClick(rec)
+	local b = rec.click
+	if not b then return end
+	local want = db.cureClick and db.locked ~= false and db.cureOn and not S.conflict and S.known[rec.cure.key] == true
+	local name = want and (rec.cure.localName or rec.cure.name) or false
+	if rec.armed == name then return end
+	rec.armed = name
+	pcall(function()
+		if name then
+			b:SetAttribute("type1", "spell")
+			b:SetAttribute("spell1", name)
+			b:SetAttribute("unit1", "player")
+		else
+			b:SetAttribute("type1", nil)
+			b:SetAttribute("spell1", nil)
+			b:SetAttribute("unit1", nil)
+		end
+		b.spellName = name or nil
+		b:EnableMouse(name and true or false)
+	end)
+	dbg("CURES click: %s %s", rec.cure.key, name and ("cast " .. name .. " on you") or "off")
+end
+
 local PARK = -9000
 -- one slot = one frame the game shows while a matching debuff is on you. Unassigned: empty type list + parked off screen.
 local function newSlot(cure, kind, index)
@@ -301,6 +363,7 @@ local function newSlot(cure, kind, index)
 			pcall(button.EnableMouse, button, false)
 			rec.parts = buildParts(button, kind, cure)
 			styleParts(rec.parts, clamp(db.cureSize, 16, 80, 36))
+			if kind == "row" then rec.click = makeClick(button, cure) end
 			if kind == "row" and db.cureCount then
 				rec.countOn = pcall(button.SetApplicationCount, button, rec.parts.count, {})   -- the game writes the stack count
 			end
@@ -324,6 +387,8 @@ local function parkSlot(rec)
 		rec.frame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", PARK, -PARK)
 	end)
 	rec.on, rec.anchor = false, nil
+	rec.armed = nil
+	if rec.click then pcall(function() rec.click:SetAttribute("type1", nil); rec.click:SetAttribute("spell1", nil); rec.click:EnableMouse(false) end); rec.armed = false end
 end
 
 local function assignSlot(rec, anchor, w)
@@ -610,6 +675,7 @@ local function apply()
 					elseif not db.cureCount and rec.countOn then pcall(rec.button.ClearApplicationCount, rec.button); rec.parts.count:SetText(""); rec.countOn = false end
 				end
 				paintCooldown(rec.parts)
+				armClick(rec)
 			end
 		elseif rec and rec.on then
 			parkSlot(rec)
