@@ -1,3 +1,5 @@
+<p align="center"><img src="icon.png" alt="ShamanKit icon" width="128" height="128"></p>
+
 # ShamanKit
 
 Small helpers for shamans, for World of Warcraft: Forever, in the default UI style.
