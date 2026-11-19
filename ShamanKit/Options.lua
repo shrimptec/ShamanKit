@@ -276,7 +276,7 @@ function ns.buildOptions()
 	-- ------------------------------------------------------------ page 1: the totem bar
 	local main = newPage("Totem bar", "Totem bar",
 		"Your active totems, how long they have left, and whether you are in range of each.",
-		{ "size", "spacing", "vertical", "showTimer", "showRange", "showOut", "tint", "distanceMode", "rangeByBuff", "buffBadge", "attach", "attachX", "attachY", "locked" })
+		{ "size", "spacing", "vertical", "showTimer", "showRange", "showOut", "tint", "distanceMode", "rangeByBuff", "buffBadge", "buffFollow", "attach", "attachX", "attachY", "locked" })
 	local p1 = main.panel
 
 	header(p1, "Totem icons", LEFT, -88, COLW)
@@ -316,15 +316,26 @@ function ns.buildOptions()
 	note(p1, "Move on screen (top right) drags everything at once.", RIGHT, -240)
 
 	header(p1, "Buff on the icon", RIGHT, -268, COLW)
-	main.add(checkbox(p1, "Show the totem's buff on its icon", "buffBadge", RIGHT, -292))
-	note(p1, "A small picture of the buff while you have it. The game\ndraws it, so it works in a fight and in dungeons, where\nrange can't be measured. No picture: you don't have it.", RIGHT + 28, -320)
+	local function badgeMode()
+		local d = ns.get()
+		if d.buffBadge == false then return "none" end
+		return d.buffFollow == true and "follow" or "corner"
+	end
+	local badge = radioGroup(p1, {
+		{ "corner", "Small picture on the corner while you have it" },
+		{ "follow", "The icon follows it: bright with, red without" },
+		{ "none", "Nothing" },
+	}, RIGHT, -292, 1, 0, 24, badgeMode,
+		function(v) local d = ns.get(); d.buffBadge = v ~= "none"; d.buffFollow = v == "follow" end)
+	main.add(badge)
+	note(p1, "The game draws it, so it holds in a fight and in\ndungeons, where range can't be measured.", RIGHT, -368)
 
 	-- advanced: exact nudges while under the player frame, and how the range is judged
-	local offX = main.adv(main.add(slider(p1, "Position left / right (under the player frame)", "attachX", -200, 300, RIGHT, -372)))
-	local offY = main.adv(main.add(slider(p1, "Position up / down (under the player frame)", "attachY", -100, 100, RIGHT, -427)))
-	main.adv(header(p1, "Range accuracy", RIGHT, -488, COLW))
-	main.adv(main.add(checkbox(p1, "Watch the totem's buff", "rangeByBuff", RIGHT, -514)))
-	main.adv(note(p1, "On: a buff totem is judged by its buff when the game lets\naddons see it; close to the edge the mark is a yellow ?.", RIGHT + 28, -542))
+	local offX = main.adv(main.add(slider(p1, "Position left / right (under the player frame)", "attachX", -200, 300, RIGHT, -412)))
+	local offY = main.adv(main.add(slider(p1, "Position up / down (under the player frame)", "attachY", -100, 100, RIGHT, -467)))
+	main.adv(header(p1, "Range accuracy", LEFT, -506, COLW))
+	main.adv(main.add(checkbox(p1, "Watch the totem's buff", "rangeByBuff", LEFT, -530)))
+	main.adv(note(p1, "On: a buff totem is judged by its buff when the game\nlets addons see it; near the edge a yellow ?.", LEFT + 28, -556))
 
 	-- offsets only matter while attached; dragging only while detached (the small icons can be dragged on their own)
 	local function mainDependents()
@@ -334,7 +345,7 @@ function ns.buildOptions()
 		enable(unlock, not on or ns.auxMode() == "free")
 	end
 	attach:HookScript("OnClick", mainDependents)
-	main.after[#main.after + 1] = function() distance.refresh(); mainDependents() end
+	main.after[#main.after + 1] = function() distance.refresh(); badge.refresh(); mainDependents() end
 
 	-- ------------------------------------------------------------ page 2: the totems
 	local totems = newPage("Totems", "Totems",

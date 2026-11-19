@@ -522,10 +522,14 @@ local function rangeOf(slot, now)
 	else
 		how = "unknown"
 	end
+	-- the game itself is drawing this totem's buff over its icon (Badges.lua), so in a fight, where nothing can be read,
+	-- the icon stands red and the game's own picture covers it while the buff is on you: exact, no guess
+	local follows = smart and buff == nil and ns.badgeFollows and ns.badgeFollows(slot, s.aura) or false
+	if follows then r, how, dist = nil, "game-drawn buff", nil end
 	if r ~= nil then s.sure = r end                 -- the last clear answer
 	local held                                      -- no source at all (no position, buff hidden): the last clear answer stands, as a "?"
 	if r == nil and how == "unknown" then held = s.sure end
-	local key = tostring(r) .. how .. tostring(buff ~= nil and byPos ~= nil and buff ~= byPos) .. tostring(held)
+	local key = tostring(follows) .. tostring(r) .. how .. tostring(buff ~= nil and byPos ~= nil and buff ~= byPos) .. tostring(held)
 	if s.last ~= key then
 		s.last = key
 		if not now.mapRead then readMapPos(now) end   -- the log line wants both sources
@@ -534,8 +538,9 @@ local function rangeOf(slot, now)
 			slot, tostring(s.name), tostring(r), how, dist and ("%.1f"):format(dist) or "-", tostring(s.range),
 			tostring(byPos), describe(now), describe(was), tostring(InCombatLockdown()))
 	end
-	return r, how, dist, held
+	return r, how, dist, held, follows
 end
+ns.rangeOf = rangeOf
 
 -- ---------------------------------------------------------------- buttons
 
@@ -554,8 +559,10 @@ local function tooltip(self)
 	if not shown then GameTooltip:SetText(buttons[self.slot].sampleName or "Totem") end
 	local s = state[self.slot]
 	if s and not previewing then
-		local r, how, _, held = rangeOf(self.slot)
-		if r == nil and how:find("near the edge", 1, true) then
+		local r, how, _, held, follows = rangeOf(self.slot)
+		if follows then
+			GameTooltip:AddLine("Bright: you have its buff. Red: you don't. The game draws it, so it holds in a fight.", 1, 1, 1, true)
+		elseif r == nil and how:find("near the edge", 1, true) then
 			GameTooltip:AddLine(("Can't tell, near the edge of its %d yd (the totem lands a little to one side)"):format(s.range), 1, 1, 1)
 		else
 			local text = r == true and "In range" or r == false and "Out of range" or "Range unknown"
@@ -579,6 +586,7 @@ local function newButton(slot)
 	b.cooldown = CreateFrame("Cooldown", nil, b, "CooldownFrameTemplate")
 	b.cooldown:SetAllPoints()
 	b.cooldown:SetDrawEdge(false)
+	b.cooldown:SetFrameLevel(b:GetFrameLevel() + 3)   -- room under it for the game-drawn buff picture (Badges.lua)
 
 	-- the same bevelled frame the action buttons use
 	b.over = CreateFrame("Frame", nil, b)
@@ -756,11 +764,11 @@ local function layout()
 	if ns.callApply then ns.callApply() end    -- the Call spell buttons sit at the bar's ends (Calls.lua)
 end
 
-local function setMark(b, r)
+local function setMark(b, r, follows)
 	-- check (in range) and cross (out of range) are separate options. The "?" (unknown) is NOT optional: with both marks
 	-- off, an unknown answer used to look exactly like "in range" (seen in a dungeon, where no position can be read and
 	-- the buff is hidden in a fight: every totem looked fine)
-	local want = r == nil or (r and db.showRange) or (r == false and db.showOut)
+	local want = not follows and (r == nil or (r and db.showRange) or (r == false and db.showOut))
 	if not want then b.mark:Hide() return end
 	-- unknown gets its own yellow "?" so a blank is never mistaken for "in range"
 	b.mark:SetTexture(r == nil and "Interface\\RaidFrame\\ReadyCheck-Waiting"
@@ -822,16 +830,16 @@ local function invalidate(b)
 	b.pc, b.psr, b.pt, b.pd, b.pdc, b.pdv, b.pg, b.pgb, b.pm = nil, nil, nil, nil, nil, nil, nil, nil, nil
 end
 
-local function paintRange(b, r, dist, range, held)
-	local c = r == nil and 0 or (r and 1 or 2)
+local function paintRange(b, r, dist, range, held, follows)
+	local c = follows and 3 or (r == nil and 0 or (r and 1 or 2))
 	local showRange = (db.showRange and 1 or 0) + (db.showOut and 2 or 0)
 	if b.pc ~= c or b.psr ~= showRange then
 		b.pc, b.psr = c, showRange
-		setMark(b, r)
+		setMark(b, r, follows)
 	end
 	-- an answer nobody can read (no position, buff hidden in a fight) keeps the last clear answer's tint: a totem that was
 	-- red when the fight began stays red, instead of lighting up as if you were next to it
-	local tint = ((r == false or (r == nil and held == false)) and db.tint) and true or false
+	local tint = (follows or ((r == false or (r == nil and held == false)) and db.tint)) and true or false
 	if b.pt ~= tint then
 		b.pt = tint
 		if tint then b.icon:SetVertexColor(unpack(OUT_COLOR)) else b.icon:SetVertexColor(1, 1, 1) end
@@ -1014,8 +1022,8 @@ local function tick()
 			else
 				any = true
 				if have then noticeReplaced(slot, visible, start) end
-				local r, _, d, held = rangeOf(slot, now)
-				paintRange(b, r, d, state[slot] and state[slot].range, held)
+				local r, _, d, held, follows = rangeOf(slot, now)
+				paintRange(b, r, d, state[slot] and state[slot].range, held, follows)
 			end
 		end
 	end
@@ -2057,9 +2065,9 @@ SlashCmdList.SHAMANKIT = function(msg)
 			local s = state[slot]
 			if s then
 				any = true
-				local r, how, _, held = rangeOf(slot)
+				local r, how, _, held, follows = rangeOf(slot)
 				print(("|cff33ff99ShamanKit|r slot %d: %s, radius %d, %s via %s%s"):format(slot, s.name or "?", s.range,
-					r == true and "in range" or r == false and "OUT of range" or "unknown", how,
+					follows and "bright with the buff, red without" or r == true and "in range" or r == false and "OUT of range" or "unknown", how,
 					(r == nil and held ~= nil) and (held and " (last known: in range)" or " (last known: out of range)") or ""))
 			end
 		end

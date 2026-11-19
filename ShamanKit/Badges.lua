@@ -19,13 +19,14 @@ local db
 
 local D = ns.defaults
 D.buffBadge = true             -- show the totem's buff on its icon while it is on you (works in a fight and in dungeons)
+D.buffFollow = false           -- in a fight the totem icon itself follows the buff: bright with the buff, red without it
 -- (db.buffIds is not a default: it is learned, one set of spell ids per buff name)
 
 local SLOTS = 4
 local MAX_IDS = 16                                  -- per buff name: ranks and look-alikes, never an endless list
-local MAX_BOXES = 24                                -- containers in all (there is no way to remove one)
+local MAX_BOXES = 48                                -- containers in all (there is no way to remove one)
 
-local S = { boxes = {}, nboxes = 0, scheduled = false, pending = false }
+local S = { boxes = {}, nboxes = 0, scheduled = false, pending = false, armed = {} }
 ns.badgeState = S
 
 local function short(m) m = tostring(m):gsub("%s+", " "); return m:sub(1, 80) end
@@ -59,23 +60,35 @@ local function sorted(set) local l = {}; for k, v in pairs(set) do if type(k) ==
 
 -- ---------------------------------------------------------------- one game-drawn container per spell id
 
+local function iconSize(b)
+	local w = b and b.GetWidth and b:GetWidth()
+	if type(w) == "number" and w > 0 then return w end
+	return db.size or 36
+end
 local function size() return math.max(14, math.floor((db.size or 36) * 0.45 + 0.5)) end
 
 -- runs once per button, BEFORE the game restricts it: everything the badge is made of goes in here
 local function styleButton(button)
-	local s = size()
+	local mode = S.making or {}
+	local s = mode.follow and mode.full or size()
 	pcall(button.SetSize, button, s, s)
 	pcall(function()
 		local bar = ns.bar
 		if bar then
 			button:SetFrameStrata(bar:GetFrameStrata())
-			button:SetFrameLevel((bar:GetFrameLevel() or 1) + 30)
+			-- a badge rides above everything; the follow picture sits just above the icon itself, under its timer and marks
+			button:SetFrameLevel((bar:GetFrameLevel() or 1) + (mode.follow and 2 or 30))
 		end
 	end)
 	pcall(button.EnableMouse, button, false)
 	local icon = button:CreateTexture(nil, "BACKGROUND")
 	icon:SetAllPoints()
 	icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+	if mode.follow then
+		if mode.tex then icon:SetTexture(mode.tex) end             -- the totem's own picture, drawn only while the buff is on
+		S.lastButton, S.lastBorder, S.lastIcon = button, nil, icon
+		return
+	end
 	pcall(button.SetIcon, button, icon)                         -- the game puts the buff's own picture here
 	local over = CreateFrame("Frame", nil, button)
 	over:SetAllPoints()
@@ -87,8 +100,9 @@ local function styleButton(button)
 	S.lastButton, S.lastBorder = button, border
 end
 
-local function makeBox(id)
-	if S.failed or S.boxes[id] then return S.boxes[id] end
+local function makeBox(id, follow, tex, full)
+	local bkey = id .. (follow and "f" or "b")
+	if S.failed or S.boxes[bkey] then return S.boxes[bkey] end
 	if S.nboxes >= MAX_BOXES then return nil end
 	local box
 	local ok, err = pcall(function()
@@ -98,10 +112,11 @@ local function makeBox(id)
 		local c = CreateFrame("AuraContainer", nil, UIParent, "CustomAuraContainerTemplate")
 		c:SetUnit("player")
 		c:SetSize(1, 1)
-		S.lastButton, S.lastBorder = nil, nil
+		S.lastButton, S.lastBorder, S.lastIcon = nil, nil, nil
+		S.making = { follow = follow, tex = tex, full = full }
 		local opts = { candidateFilters = { includeSpellIDs = { [id] = true } }, initializeFrame = styleButton }
 		local how
-		local key = "ShamanKitTotemBuff" .. id
+		local key = "ShamanKitTotemBuff" .. bkey
 		local button
 		if c.AddAuraSlot then
 			button = c:AddAuraSlot(key, "HELPFUL", opts) or S.lastButton
@@ -113,33 +128,37 @@ local function makeBox(id)
 			pcall(c.SetFlowLayoutAnchorPoint, c, "TOPLEFT")
 			how = "group"
 		end
-		box = { id = id, c = c, button = button, border = S.lastBorder, how = how }
+		box = { id = id, c = c, button = button, border = S.lastBorder, icon = S.lastIcon, how = how, follow = follow }
 		c:SetEnabled(false)
 		c:Hide()
 	end)
+	S.making = nil
 	if not ok then
 		S.failed = true
 		dbg("BADGE container could not be made for spell %d: %s (no buff badges; the range marks work as before)", id, short(err))
 		return nil
 	end
-	S.boxes[id] = box
+	S.boxes[bkey] = box
 	S.nboxes = S.nboxes + 1
-	dbg("BADGE container made for spell %d (%s)", id, box.how)
+	dbg("BADGE container made for spell %d (%s%s)", id, box.how, follow and ", follows the icon" or "")
 	return box
 end
 
 -- out of combat only: put the box on the totem's icon and show it, or hide it
 local function place(box, b, s)
-	local key = b and (tostring(b) .. "|" .. s) or "off"
+	local full = iconSize(b)
+	local key = b and (tostring(b) .. "|" .. s .. "|" .. full) or "off"
 	if box.key == key then return end
 	box.key = key
 	pcall(function()
 		if b then
+			local dx, dy, w = -3, 3, s
+			if box.follow then dx, dy, w = 0, 0, full end          -- exactly on the icon, as big as it
 			box.c:ClearAllPoints()
-			box.c:SetPoint("TOPLEFT", b, "TOPLEFT", -3, 3)
+			box.c:SetPoint("TOPLEFT", b, "TOPLEFT", dx, dy)
 			if box.button then
-				box.button:SetSize(s, s)
-				if box.how == "slot" then box.button:ClearAllPoints(); box.button:SetPoint("TOPLEFT", b, "TOPLEFT", -3, 3) end
+				box.button:SetSize(w, w)
+				if box.how == "slot" then box.button:ClearAllPoints(); box.button:SetPoint("TOPLEFT", b, "TOPLEFT", dx, dy) end
 			end
 			if box.border then box.border:SetSize(s * 66 / 36, s * 66 / 36) end
 			box.c:SetEnabled(true)
@@ -158,17 +177,34 @@ local function apply()
 	S.pending = false
 	local wanted = db.buffBadge ~= false
 	local s = size()
-	local want = {}                                                    -- spell id -> the totem's icon it sits on
+	local want = {}                                                    -- box key -> the totem's icon it sits on
+	local follow = wanted and db.buffFollow == true
+	local armed = {}
 	if wanted and not S.failed then
 		for slot = 1, SLOTS do
 			local b = ns.barButton and ns.barButton(slot)
 			local st = ns.barState and ns.barState(slot)
 			local set = (b and b:IsShown() and st and st.aura) and idsFor(st.aura) or nil
-			if set then for _, id in ipairs(sorted(set)) do if not want[id] then want[id] = b end end end
+			if set then
+				local tex = follow and b.icon and b.icon:GetTexture() or nil
+				local full = iconSize(b)
+				local okAll = true
+				for _, id in ipairs(sorted(set)) do
+					local bkey = id .. (follow and "f" or "b")
+					if not S.boxes[bkey] then makeBox(id, follow, tex, full) end
+					if S.boxes[bkey] and not want[bkey] then want[bkey] = b else okAll = false end
+				end
+				if follow and okAll then armed[slot] = st.aura end
+			end
 		end
-		for id in pairs(want) do makeBox(id) end
 	end
-	for id, box in pairs(S.boxes) do place(box, want[id], s) end
+	for bkey, box in pairs(S.boxes) do place(box, want[bkey], s) end
+	S.armed = armed
+end
+
+-- the totem icon in this slot is being drawn by the game while its buff is on (so it can stand red when it is not)
+function ns.badgeFollows(slot, aura)
+	return db ~= nil and db.buffFollow == true and db.buffBadge ~= false and aura ~= nil and S.armed[slot] == aura
 end
 ns.badgeApply = guard("badges", apply)
 
@@ -212,6 +248,9 @@ function ns.badgeInfo()
 	table.sort(names)
 	out[#out + 1] = ("buff badges: %s, %s"):format(db.buffBadge ~= false and "on" or "off",
 		S.failed and "the game would not make the container" or (S.nboxes > 0 and ("%d drawn by the game"):format(S.nboxes) or "none made yet"))
+	local f = {}
+	for slot = 1, SLOTS do if S.armed[slot] then f[#f + 1] = ("slot %d (%s)"):format(slot, S.armed[slot]) end end
+	out[#out + 1] = ("icon follows the buff in a fight: %s%s"):format(db.buffFollow == true and "on" or "off", #f > 0 and (", ready for " .. table.concat(f, ", ")) or "")
 	out[#out + 1] = "buff spell ids learned: " .. (#names > 0 and table.concat(names, ", ") or "none yet (learned the first time a totem's buff can be read)")
 	return out
 end

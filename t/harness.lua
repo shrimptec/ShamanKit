@@ -47,6 +47,7 @@ local function mock(kind)
 		if k == "SetTextColor" then return function(self, ...) CALLS.SetTextColor = CALLS.SetTextColor + 1; self.color = { ... } end end
 		if k == "SetVertexColor" then return function(self, ...) CALLS.SetVertexColor = CALLS.SetVertexColor + 1; self.color = { ... } end end
 		if k == "SetTexture" then return function(self, v) CALLS.SetTexture = CALLS.SetTexture + 1; self.tex = v end end
+		if k == "GetTexture" then return function(self) return self.tex end end
 		if k == "GetNormalTexture" or k == "GetHighlightTexture" or k == "GetCheckedTexture" then return function() return mock("region") end end
 		if k == "SetOrientation" then return function(self, v) self.orientation = v end end
 		if k == "SetStatusBarColor" then return function(self, ...) self.sbcolor = { ... } end end
@@ -3269,28 +3270,28 @@ do
 	totems[2] = { name = "Strength of Earth Totem", start = t, dur = 300, icon = 8 }
 	fire("PLAYER_TOTEM_UPDATE", 2); t = t + 1; tick(); settle()
 	check(db.buffIds and db.buffIds["Strength of Earth"] and db.buffIds["Strength of Earth"][8076] == true, "badges: the buff's spell id is learned from the real buff")
-	local box = S.boxes[8076]
+	local box = S.boxes["8076b"]
 	check(box ~= nil and S.nboxes == 1, "badges: a game-drawn container is made for it")
-	check(box.c.slots and box.c.slots["ShamanKitTotemBuff8076"] and box.c.slots["ShamanKitTotemBuff8076"].opts.candidateFilters.includeSpellIDs[8076] == true, "badges: it shows only that buff (limited to its spell id)")
+	check(box.c.slots and box.c.slots["ShamanKitTotemBuff8076b"] and box.c.slots["ShamanKitTotemBuff8076b"].opts.candidateFilters.includeSpellIDs[8076] == true, "badges: it shows only that buff (limited to its spell id)")
 	check(box.c.unit == "player", "badges: on the player")
 	check(box.c.shown == true and box.c.enabled == true, "badges: shown and enabled while the totem is out")
 	check(box.c.anchor[1] == "TOPLEFT" and box.c.anchor[2] == btn(2) and box.button.anchor[2] == btn(2), "badges: on the totem's icon")
 	check(box.button.w == 16 and box.button.h == 16, "badges: sized to the icon (45%)")
 	-- another rank
 	auras["Strength of Earth"] = { spellId = 25528 }; t = t + 1; tick(); settle()
-	check(db.buffIds["Strength of Earth"][25528] == true and S.boxes[25528] ~= nil and S.boxes[25528].c.shown and S.boxes[8076].c.shown, "badges: a higher rank is learned too, and both are armed on the icon")
+	check(db.buffIds["Strength of Earth"][25528] == true and S.boxes["25528b"] ~= nil and S.boxes["25528b"].c.shown and S.boxes["8076b"].c.shown, "badges: a higher rank is learned too, and both are armed on the icon")
 	-- a different size follows the icon size
 	db.size = 60; ns.updatePreview(); settle()
-	check(S.boxes[8076].button.w == 27, "badges: the badge follows the icon size")
+	check(S.boxes["8076b"].button.w == 27, "badges: the badge follows the icon size")
 	db.size = 36; ns.updatePreview(); settle()
 
 	-- the totem goes: the badge goes
 	totems[2] = nil; fire("PLAYER_TOTEM_UPDATE", 2); settle()
-	check(not S.boxes[8076].c.shown and not S.boxes[25528].c.shown, "badges: no totem: no badge")
+	check(not S.boxes["8076b"].c.shown and not S.boxes["25528b"].c.shown, "badges: no totem: no badge")
 	-- a totem with no buff to name has none
 	totems[1] = { name = "Searing Totem III", start = t, dur = 60, icon = 7 }
 	fire("PLAYER_TOTEM_UPDATE", 1); tick(); settle()
-	check(not S.boxes[8076].c.shown and S.nboxes == 2, "badges: a damage totem has no buff badge")
+	check(not S.boxes["8076b"].c.shown and S.nboxes == 2, "badges: a damage totem has no buff badge")
 	totems[1] = nil; fire("PLAYER_TOTEM_UPDATE", 1); settle()
 
 	-- the same totem again, in a fight: nothing is touched until it ends
@@ -3314,10 +3315,10 @@ do
 	for _, f in ipairs(frames) do if f.registered and f.registered.PLAYER_REGEN_ENABLED and f.registered.PLAYER_ENTERING_WORLD and not f.registered.SPELLS_CHANGED and not f.registered.ADDON_LOADED then cf2 = f end end
 	check(cf2 ~= nil, "badges: a frame listens for the end of a fight")
 	cf2.scripts.OnEvent(cf2, "PLAYER_REGEN_ENABLED"); settle()
-	check(writes > 0 and S.boxes[8076].c.shown and S.pending == false, "badges: after the fight the badge is put on the icon")
+	check(writes > 0 and S.boxes["8076b"].c.shown and S.pending == false, "badges: after the fight the badge is put on the icon")
 	for _, bx in pairs(S.boxes) do for _, o in ipairs({ bx.c, bx.button }) do rawset(o, "SetPoint", nil); rawset(o, "Show", nil) end end
 	-- auras hidden out of a fight (as some places do): the same waiting
-	local keepKey = S.boxes[8076].key
+	local keepKey = S.boxes["8076b"].key
 	totems[2] = nil; fire("PLAYER_TOTEM_UPDATE", 2); settle()
 	totems[3] = { name = "Mana Spring Totem", start = t, dur = 300, icon = 9 }
 	AURAS_HIDDEN = true
@@ -3329,18 +3330,22 @@ do
 	-- the option
 	totems[2] = { name = "Strength of Earth Totem", start = t, dur = 300, icon = 8 }
 	fire("PLAYER_TOTEM_UPDATE", 2); settle()
-	check(S.boxes[8076].c.shown == true, "badges: on")
+	check(S.boxes["8076b"].c.shown == true, "badges: on")
 	db.buffBadge = false; ns.badgeSchedule(); settle()
-	check(not S.boxes[8076].c.shown and not S.boxes[8076].c.enabled, "badges: switched off: gone")
+	check(not S.boxes["8076b"].c.shown and not S.boxes["8076b"].c.enabled, "badges: switched off: gone")
 	db.buffBadge = true; ns.badgeSchedule(); settle()
-	check(S.boxes[8076].c.shown == true, "badges: switched on again: back")
-	local pageOpt
-	for _, f in ipairs(frames) do if f.settingKey == "buffBadge" and f.parentFrame == savedCat.pages[2] then pageOpt = f end end
-	check(pageOpt ~= nil, "badges: a box on the Totem bar page")
-	pageOpt:SetChecked(false); pageOpt.scripts.OnClick(pageOpt); settle()
-	check(db.buffBadge == false and not S.boxes[8076].c.shown, "badges: unticking it hides them at once")
-	db.buffBadge = false; savedCat.pages[2].OnDefault()
-	check(db.buffBadge == true, "badges: the page's Defaults switches it on")
+	check(S.boxes["8076b"].c.shown == true, "badges: switched on again: back")
+	local bm = {}
+	for _, f in ipairs(frames) do if (f.value == "corner" or f.value == "follow" or f.value == "none") and f.scripts.OnClick and f.parentFrame == savedCat.pages[2] then bm[f.value] = f end end
+	check(bm.corner and bm.follow and bm.none, "badges: three choices on the Totem bar page (corner, follow, nothing)")
+	bm.none.scripts.OnClick(bm.none); settle()
+	check(db.buffBadge == false and db.buffFollow == false and bm.none.checked and not bm.corner.checked and not S.boxes["8076b"].c.shown, "badges: 'Nothing' hides them at once")
+	bm.follow.scripts.OnClick(bm.follow); settle()
+	check(db.buffBadge == true and db.buffFollow == true and bm.follow.checked and not bm.none.checked, "badges: 'The icon follows it' sets both")
+	bm.corner.scripts.OnClick(bm.corner); settle()
+	check(db.buffBadge == true and db.buffFollow == false and bm.corner.checked and S.boxes["8076b"].c.shown, "badges: 'Small picture' is the plain badge again")
+	db.buffBadge = false; db.buffFollow = true; savedCat.pages[2].OnDefault()
+	check(db.buffBadge == true and db.buffFollow == false and bm.corner.checked, "badges: the page's Defaults: the small picture, not following")
 	settle()
 
 	-- only plain numbers that name a spell are learned; the list per buff stays short
@@ -3361,7 +3366,7 @@ do
 	SlashCmdList.SHAMANKIT("status")
 	print = pr
 	local joined = table.concat(out, "\n")
-	check(joined:find("buff badges: on, 2 drawn by the game") and joined:find("Strength of Earth %(8076,25528%)"), "badges: /shamankit status lists the learned ids")
+	check(joined:find("buff badges: on, %d+ drawn by the game") and joined:find("Strength of Earth %(8076,25528%)"), "badges: /shamankit status lists the learned ids")
 
 	-- a pass with nothing changed writes nothing
 	local rw = 0
@@ -3374,6 +3379,7 @@ do
 	for _ = 1, 5 do ns.badgeApply() end
 	check(rw == 0, "badges: a pass with nothing changed moves nothing (" .. rw .. ")")
 	for _, bx in pairs(S.boxes) do for _, o in ipairs({ bx.c, bx.button }) do rawset(o, "SetPoint", nil) end end
+	S.boxes = {}; S.nboxes = 0; ns.badgeSchedule(); settle(); S.boxes = {}; S.nboxes = 0
 	-- never more containers than the cap (there is no way to remove one)
 	for i = 1, 14 do ns.learnBuff("Strength of Earth", 20000 + i) end
 	totems[3] = { name = "Mana Spring Totem", start = t, dur = 300, icon = 9 }
@@ -3381,9 +3387,99 @@ do
 	fire("PLAYER_TOTEM_UPDATE", 3)
 	for i = 1, 16 do ns.learnBuff("Mana Spring", 30000 + i) end
 	settle()
-	check(S.nboxes == 24, "badges: containers are capped at 24 (" .. S.nboxes .. ")")
+	local ks = {}; for k in pairs(S.boxes) do ks[#ks+1] = k end; table.sort(ks); check(S.nboxes == 32, "badges: one container per spell id (" .. S.nboxes .. ": " .. table.concat(ks, " ") .. ")")
+	db.buffFollow = true; ns.badgeSchedule(); settle()
+	check(S.nboxes == 48, "badges: containers are capped at 48 (" .. S.nboxes .. ")")
+	db.buffFollow = false; ns.badgeSchedule(); settle()
 	totems[2] = nil; totems[3] = nil; fire("PLAYER_TOTEM_UPDATE", 2); fire("PLAYER_TOTEM_UPDATE", 3); settle()
 	S.boxes = {}; S.nboxes = 0; db.buffIds = { ["Strength of Earth"] = { [8076] = true, [25528] = true } }
+
+	-- the icon follows the buff: bright with it, red without it, decided by the game in a fight
+	do
+		local function red(b) return b.icon.color and b.icon.color[1] == 0.8 and b.icon.color[2] == 0.1 end
+		local function plain(b) return not b.icon.color or (b.icon.color[1] == 1 and b.icon.color[2] == 1 and b.icon.color[3] == 1) end
+		local function waiting(b) return b.mark.shown ~= false and b.mark.tex and b.mark.tex:find("Waiting") ~= nil end
+		local kt, kc, ks = db.tint, db.showRange, db.showOut
+		db.tint = true; db.showRange = true; db.showOut = true
+		clear(); BUFF_READS = true; S.failed = false; S.boxes = {}; S.nboxes = 0
+		db.buffBadge = true; db.buffFollow = true
+		db.buffIds = { ["Strength of Earth"] = { [8076] = true }, ["Stoneskin"] = { [10405] = true } }
+		pos = { y = 0, x = 0, map = 1 }; t = t + 10
+		totems[2] = { name = "Strength of Earth Totem IV", start = t, dur = 120, icon = 8 }
+		fire("PLAYER_TOTEM_UPDATE", 2); t = t + 1; tick(); settle()
+		local fb = S.boxes["8076f"]
+		check(fb ~= nil and fb.follow == true and S.boxes["8076b"] == nil, "follow: its own container, and no corner badge")
+		check(fb.c.slots["ShamanKitTotemBuff8076f"].opts.candidateFilters.includeSpellIDs[8076] == true, "follow: only that buff")
+		check(fb.button.w == db.size and fb.c.anchor[1] == "TOPLEFT" and fb.c.anchor[2] == btn(2) and fb.c.anchor[3] == "TOPLEFT" and fb.c.anchor[4] == 0 and fb.c.anchor[5] == 0, "follow: exactly on the icon, as big as it")
+		check(fb.c.shown and fb.c.enabled, "follow: shown")
+		check(fb.button.iconTex == nil and S.boxes["8076f"].button.sizeAtInit == db.size, "follow: the game's own buff picture is not used, and it is the icon's size from the start (" .. tostring(fb.button.sizeAtInit) .. ")")
+		check(fb.icon ~= nil and fb.icon.tex ~= nil and fb.icon.tex == btn(2).icon.tex, "follow: it shows the totem's own picture (" .. tostring(fb.icon and fb.icon.tex) .. ")")
+		check(ns.badgeFollows(2, "Strength of Earth") == true and ns.badgeFollows(2, "Stoneskin") == false and ns.badgeFollows(3, "Strength of Earth") == false, "follow: armed for that totem in that place only")
+		-- out of a fight the buff still answers, exactly
+		auras["Strength of Earth"] = { spellId = 8076 }; t = t + 1; tick()
+		check(plain(btn(2)) and not waiting(btn(2)), "follow: out of a fight, with the buff: in range")
+		auras["Strength of Earth"] = nil; t = t + 5; tick()
+		check(red(btn(2)) and not waiting(btn(2)), "follow: out of a fight, no buff: out")
+		-- in a fight: red for everything, whatever the position says; no ?, no marks, no number
+		AURAS_HIDDEN = true; inCombat = true
+		for _, x in ipairs({ 0, 20, 27, 31, 100 }) do
+			pos = { y = 0, x = x, map = 1 }; t = t + 1; tick()
+			check(red(btn(2)) and btn(2).mark.shown == false and not btn(2).dist.shown and btn(2).gauge.shown ~= true, "follow: in a fight at " .. x .. " yd: red, no mark, no number, no bar")
+		end
+		pos = nil; mapOn = false; t = t + 1; tick()
+		check(red(btn(2)) and btn(2).mark.shown == false, "follow: in a fight with no position at all: still just red under the game's picture")
+		pos = { y = 0, x = 0, map = 1 }; mapOn = true
+		local tips = {}
+		rawset(GameTooltip, "AddLine", function(_, text) tips[#tips + 1] = text end)
+		_G.ShamanKitHit2.scripts.OnEnter(_G.ShamanKitHit2)
+		rawset(GameTooltip, "AddLine", nil)
+		check(tips[#tips] and tostring(tips[#tips]):find("Bright: you have its buff") ~= nil, "follow: the tooltip says what bright and red mean")
+		-- a totem with nothing learned yet, or another totem in the same place, is judged as before
+		totems[2] = { name = "Stoneskin Totem", start = t, dur = 120, icon = 8 }
+		fire("PLAYER_TOTEM_UPDATE", 2); t = t + 1; pos = { y = 0, x = 0, map = 1 }; tick()
+		check(not select(5, ns.rangeOf(2)), "follow: another totem arriving in a fight is not covered by the old container")
+		totems[2] = { name = "Strength of Earth Totem IV", start = t, dur = 120, icon = 8 }
+		fire("PLAYER_TOTEM_UPDATE", 2); tick()
+		check(select(5, ns.rangeOf(2)) == true, "follow: ...and the same totem again is")
+		totems[1] = { name = "Searing Totem III", start = t, dur = 60, icon = 7 }
+		fire("PLAYER_TOTEM_UPDATE", 1); t = t + 1; tick()
+		check(select(5, ns.rangeOf(1)) == false and not red(btn(1)), "follow: a totem with no buff is judged by its position as before")
+		-- off: the setting, and 'watch the buff' off
+		AURAS_HIDDEN = false; inCombat = false
+		db.rangeByBuff = false; t = t + 1; tick()
+		check(select(5, ns.rangeOf(2)) == false, "follow: 'watch the buff' off: the plain radius")
+		db.rangeByBuff = true
+		db.buffFollow = false
+		check(not ns.badgeFollows(2, "Strength of Earth"), "follow: switched off: no longer counts at once, before any pass")
+		db.buffFollow = true; db.buffBadge = false
+		check(not ns.badgeFollows(2, "Strength of Earth"), "follow: badge off: no longer counts at once")
+		db.buffBadge = true; db.buffFollow = false; ns.badgeSchedule(); settle()
+		check(not ns.badgeFollows(2, "Strength of Earth") and not fb.c.shown and S.boxes["8076b"] ~= nil, "follow: switched off: the corner badge instead, the follow picture gone")
+		db.buffFollow = true; ns.badgeSchedule(); settle()
+		check(ns.badgeFollows(2, "Strength of Earth") and fb.c.shown and not S.boxes["8076b"].c.shown, "follow: switched on again")
+		db.buffBadge = false; ns.badgeSchedule(); settle()
+		check(not ns.badgeFollows(2, "Strength of Earth") and not fb.c.shown, "follow: needs the badge on")
+		db.buffBadge = true; ns.badgeSchedule(); settle()
+		-- in a fight nothing is moved: a totem arriving then is armed after the fight
+		totems[2] = nil; fire("PLAYER_TOTEM_UPDATE", 2); settle()
+		check(not ns.badgeFollows(2, "Strength of Earth"), "follow: no totem: not armed")
+		AURAS_HIDDEN = true; inCombat = true
+		totems[2] = { name = "Strength of Earth Totem IV", start = t, dur = 120, icon = 8 }
+		fire("PLAYER_TOTEM_UPDATE", 2); settle(); tick()
+		check(not select(5, ns.rangeOf(2)), "follow: a totem dropped in the fight is not armed yet")
+		AURAS_HIDDEN = false; inCombat = false
+		cf2.scripts.OnEvent(cf2, "PLAYER_REGEN_ENABLED"); settle()
+		check(ns.badgeFollows(2, "Strength of Earth"), "follow: ...after the fight it is")
+		local out = {}
+		local pr = print; print = function(...) out[#out + 1] = table.concat({ ... }, " ") end
+		SlashCmdList.SHAMANKIT("status")
+		print = pr
+		check(table.concat(out, "\n"):find("icon follows the buff in a fight: on, ready for slot 2 %(Strength of Earth%)") ~= nil, "follow: /shamankit status says it is ready")
+		db.buffFollow = false; ns.badgeSchedule(); settle()
+		db.tint, db.showRange, db.showOut = kt, kc, ks
+		totems = {}; for s = 1, 4 do fire("PLAYER_TOTEM_UPDATE", s) end; settle()
+		S.boxes = {}; S.nboxes = 0
+	end
 
 	-- a game that will not make the container: no error, no retries
 	totems[2] = nil; fire("PLAYER_TOTEM_UPDATE", 2); settle()

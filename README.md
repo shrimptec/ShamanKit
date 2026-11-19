@@ -11,15 +11,16 @@ Small helpers for shamans, for World of Warcraft: Forever, in the default UI sty
   about to run out), or, if you prefer, shows which enchant is on and its time left, like the shield icon (main hand,
   hidden when dead, with no weapon or a fishing pole). The other icon shows your Lightning Shield charges while it is up. They can hang on the totem bar or the player frame (any side, any alignment, nudge and size are settings)
   or sit in a place of their own that you drag.
-- **A narrower \"?\"**: your position is only an estimate of the distance to a totem, so close to its edge in a fight the
+- **A narrower "?"**: your position is only an estimate of the distance to a totem, so close to its edge in a fight the
   icon shows a yellow ?. Each time you walk away from a totem out of a fight, ShamanKit notes where its buff really
   stopped and uses that for the same totem in the next fight, so the ? shrinks to about a yard. Totems with no buff
   (Searing, Magma) can't learn this and keep the wider ?.
-- **Buff on the totem's icon**: while the buff of a totem is on you, a small picture of that buff sits on the totem's icon.
-  The game draws it (the same way as the Lightning Shield icon), so it works in a fight and in dungeons, where no addon
-  can measure range or read buffs. No picture means you don't have the buff. The buff's spell ids are learned the first
-  time a totem's buff can be read, so drop each totem once out of a fight. A buff from someone else's identical totem
-  shows the same picture. Switch it off on the Totem bar page.
+- **Buff on the totem's icon** (Totem bar page, three choices): *a small picture on the corner* while the buff is on you, or
+  *the icon follows it*: in a fight the totem icon stands red and the game draws a bright copy over it only while you have
+  the buff, so bright means in range and red means out, with no guessing and no ?. The game draws it, so it works in a
+  fight and in dungeons, where no addon can measure range or read buffs. The buff's spell ids are learned the first time
+  a totem's buff can be read, so drop each totem once out of a fight. A buff from someone else's identical totem shows
+  too. Totems with no buff (Searing, Magma, Earthbind, Stoneclaw) keep the position estimate.
 - **Simple and advanced settings**: each settings page shows the choices most people want. The fiddly ones (exact
   nudges, screen positions, spacing, per-button placement, range-accuracy) sit behind a **Show advanced** button at the
   top right of the page; it is one switch for every page, and nothing changes in how the addon works.
