@@ -33,14 +33,14 @@ D.cureOn = true             -- the whole Cures module
 D.cureBars = true           -- light the action bar buttons that hold a cure
 D.cureRow = true            -- the small icon row
 D.cureAlways = false        -- keep the row on screen, dim, while nothing is on you
-D.cureSize = 36
+D.cureSize = 29
 D.cureSpacing = 4
 D.cureWash = true           -- a wash of the affliction's colour over the icon
-D.cureWashAlpha = 30        -- percent
+D.cureWashAlpha = 65        -- percent
 D.curePulse = true
 D.cureCount = true          -- a number on the row icon when the debuff has several stacks
 D.cureClick = true          -- click a lit row icon to cast that cure on yourself
-D.curePoint, D.cureRelPoint, D.cureX, D.cureY = "CENTER", "CENTER", 0, -160
+D.curePoint, D.cureRelPoint, D.cureX, D.cureY = "BOTTOM", "BOTTOM", -482, 337
 
 local function clamp(v, lo, hi, def)
 	if type(v) ~= "number" or v ~= v then return def end

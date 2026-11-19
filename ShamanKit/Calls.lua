@@ -30,13 +30,13 @@ local MAX_SLOTS = 4               -- places on the bar
 
 local D = ns.defaults
 D.callOn = false              -- the Call of the ... button
-D.callTotemic = false         -- the Totemic Call button
+D.callTotemic = true          -- the Totemic Call button
 D.callRecall = false          -- the Totemic Recall button
 D.callChoice = 0              -- which Call spell the button casts: a spell id, 0 = the first one you know
-D.callShow = "always"         -- "always", or "bar": only while the totem bar is up (a totem is out)
-D.callScale = 100             -- button size, % of the totem icons
+D.callShow = "bar"            -- "always", or "bar": only while the totem bar is up (a totem is out)
+D.callScale = 55              -- button size, % of the totem icons
 D.callAnchor = "bar"          -- "bar": beside the totem bar, "free": a place of their own on the screen
-D.callSide = "start"          -- of the bar: "start" (before the totems: left / above), "end" (after them), or left / right / top / bottom
+D.callSide = "right"          -- of the bar: "start" (before the totems: left / above), "end" (after them), or left / right / top / bottom
 D.callAlign = "start"         -- along that side: start / center / end
 D.callOffX, D.callOffY = 0, 0 -- a nudge from there
 D.callPoint, D.callRelPoint, D.callX, D.callY = "CENTER", "CENTER", 0, -200   -- the place of their own
@@ -44,12 +44,18 @@ D.callPoint, D.callRelPoint, D.callX, D.callY = "CENTER", "CENTER", 0, -200   --
 -- each button can also be placed on its own, apart from the others: the same settings again, one set per button
 -- (posCallOwn, posCallAnchor, posCallSide ... posTotemicOwn ... posRecallY)
 local POS = { call = "posCall", totemic = "posTotemic", recall = "posRecall" }
-local OWN_Y = { call = -200, totemic = -250, recall = -300 }   -- apart in their own places, so they don't pile up
+local OWN_Y = { call = -200, totemic = -250, recall = -300 }
+local OWN_START = {   -- how each button starts out: on its own, at the bar (left of it / above it / right of it)
+	call = { own = true, side = "left", align = "start" },
+	totemic = { own = true, side = "top", align = "center" },
+	recall = { own = true, side = "right", align = "start" },
+}   -- apart in their own places, so they don't pile up
 ns.CALL_POS_KEYS = {}
 for _, kind in ipairs({ "call", "totemic", "recall" }) do
 	local k = POS[kind]
-	D[k .. "Own"] = false          -- true: this button is placed by the settings below, not with the others
-	D[k .. "Anchor"], D[k .. "Side"], D[k .. "Align"] = "bar", "start", "start"
+	local o = OWN_START[kind]
+	D[k .. "Own"] = o.own          -- true: this button is placed by the settings below, not with the others
+	D[k .. "Anchor"], D[k .. "Side"], D[k .. "Align"] = "bar", o.side, o.align
 	D[k .. "OffX"], D[k .. "OffY"] = 0, 0
 	D[k .. "Point"], D[k .. "RelPoint"], D[k .. "X"], D[k .. "Y"] = "CENTER", "CENTER", 0, OWN_Y[kind]
 	for _, f in ipairs({ "Own", "Anchor", "Side", "Align", "OffX", "OffY", "Point", "RelPoint", "X", "Y" }) do

@@ -376,7 +376,7 @@ function ns.buildOptions()
 	totems.onDefault = function()
 		local db = ns.get()
 		db.order = ns.defaultOrder()
-		db.reserve = {}
+		db.reserve = ns.defaultReserve()
 		ns.fixHold(); db.hold.choice = {}
 	end
 

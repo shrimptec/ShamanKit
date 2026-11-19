@@ -16,12 +16,12 @@ local TICK = 0.2
 local OUT_COLOR = { 0.8, 0.1, 0.1 }   -- the default action-button "out of range" red
 
 ns.defaults = {
-	size = 36,
-	spacing = 4,
+	size = 46,
+	spacing = 6,
 	vertical = false,
 	showTimer = true,
-	showRange = true,       -- green check when in range
-	showOut = true,         -- red cross when out of range
+	showRange = false,       -- green check when in range
+	showOut = false,         -- red cross when out of range
 	rememberLast = true,    -- a placeholder shows the last totem that was out in that place (a chosen totem always wins)
 	leftCast = true,        -- left-click a place on the bar to cast the totem it shows (locked bar only)
 	rangeByBuff = true,     -- judge a buff totem by its buff when it can be read, and say "?" near the edge (off: your drop spot alone)
@@ -29,18 +29,18 @@ ns.defaults = {
 	tint = true,
 	locked = true,
 	attach = false,        -- replace the default totem timers and sit under the player frame
-	attachX = 65, attachY = 8,
-	point = "CENTER", relPoint = "CENTER", x = 0, y = -200,
+	attachX = 75, attachY = 16,
+	point = "BOTTOM", relPoint = "BOTTOM", x = 2, y = 196.5,
 	weaponOn = true,        -- buff icon for the weapon enchant
 	weaponMode = "missing", -- what it shows: "missing" (pops up when there is no enchant or it is about to run out) or "active" (the enchant that is on, with its time left, like the shield icon)
 	shieldOn = true,        -- buff icon: the Lightning Shield charges while it is up
-	auxAnchor = "bar",      -- what the two buff icons hang on: "bar" (the totem bar), "player" (the player frame) or "free" (a place of their own, drag it when unlocked)
+	auxAnchor = "free",      -- what the two buff icons hang on: "bar" (the totem bar), "player" (the player frame) or "free" (a place of their own, drag it when unlocked)
 	auxSide = "auto",       -- which side of it: "auto" (below the bar, beside a vertical bar; below the player frame, above it if the bar is there), "bottom", "top", "left", "right"
 	auxAlign = "start",     -- along that side: "start", "center" or "end"
 	auxOffX = 0, auxOffY = 0,   -- nudge from that spot
-	auxScale = 75,          -- icon size as a percent of the totem icon size
+	auxScale = 50,          -- icon size as a percent of the totem icon size
 	auxWarnMin = 2,         -- the weapon icon also shows when its enchant has less than this many minutes left (0 = only when gone)
-	auxPoint = "CENTER", auxRelPoint = "CENTER", auxX = 0, auxY = -260,   -- own place when not attached
+	auxPoint = "BOTTOM", auxRelPoint = "BOTTOM", auxX = -350, auxY = 330,   -- own place when not attached
 }
 
 -- Settings saved by older versions, brought up to date before the defaults are filled in.
@@ -83,9 +83,16 @@ ns.fixOrder = fixOrder
 
 -- db.reserve[slot] = true keeps that element's place open in the bar even when no totem of it is out (a dim
 -- placeholder fills it), so the gap itself shows what is missing. Always a table of booleans.
+local function defaultReserve()
+	local r = {}
+	for slot = 1, MAX_SLOTS do r[slot] = true end   -- every place kept open to begin with
+	return r
+end
+ns.defaultReserve = defaultReserve
+
 local function fixReserve()
 	local r = db.reserve
-	if type(r) ~= "table" then r = {}; db.reserve = r end
+	if type(r) ~= "table" then r = defaultReserve(); db.reserve = r end
 	for slot = 1, MAX_SLOTS do if r[slot] ~= true and r[slot] ~= nil then r[slot] = nil end end
 	return r
 end

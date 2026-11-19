@@ -271,6 +271,22 @@ local function noErrors(msg)
 	check(bad == nil, msg .. (bad and (" -> " .. bad) or ""))
 end
 
+-- The values the addon ships with are the author's own layout (checked at the very end). Every test below was written
+-- against a plain baseline, so pin that baseline here and keep a copy of what ships.
+local SHIPPED = {}
+for k, v in pairs(ns.defaults) do SHIPPED[k] = v end
+local BASELINE = {
+	size = 36, spacing = 4, showRange = true, showOut = true, attachX = 65, attachY = 8,
+	point = "CENTER", relPoint = "CENTER", x = 0, y = -200,
+	auxAnchor = "bar", auxScale = 75, auxPoint = "CENTER", auxRelPoint = "CENTER", auxX = 0, auxY = -260,
+	cureSize = 36, cureWashAlpha = 30, curePoint = "CENTER", cureRelPoint = "CENTER", cureX = 0, cureY = -160,
+	callTotemic = false, callShow = "always", callScale = 100, callSide = "start",
+}
+for _, k in ipairs({ "posCall", "posTotemic", "posRecall" }) do
+	BASELINE[k .. "Own"], BASELINE[k .. "Side"], BASELINE[k .. "Align"] = false, "start", "start"
+end
+for k, v in pairs(BASELINE) do assert(ns.defaults[k] ~= nil, "baseline names a default that does not exist: " .. k); ns.defaults[k] = v end
+ShamanKitDB = { reserve = {} }
 fire("ADDON_LOADED", "ShamanKit")
 -- The bar is the anchor of the secure click buttons, so the real client treats it as restricted in combat:
 -- insecure code may not show, hide, move or resize it then (this is what the "action blocked" popup is about).
@@ -666,8 +682,8 @@ do
 	secretMode = false; secretPos = false; inCombat = false; pos = { y = 0, x = 0, map = 1 }
 	fire("PLAYER_ENTERING_WORLD"); out()
 
-	-- off by default: nothing changes
-	ShamanKitDB.reserve = nil; ns.fixReserve()
+	-- nothing kept open: nothing changes (what ships keeps all four open; the baseline here is a bar with none)
+	ShamanKitDB.reserve = {}; ns.fixReserve()
 	put(1, "Searing Totem III")
 	check(not holders[1].shown and not holders[2].shown and not holders[3].shown and not holders[4].shown, "default: no placeholders")
 	check(X(btn(1)) == 0 and bar().w == ShamanKitDB.size, "default: a lone totem sits first, the bar is one icon wide")
@@ -730,14 +746,20 @@ do
 	ShamanKitDB.reserve = { [2] = true }; savedCat.panel.OnRefresh()
 	check(boxes[2].checked == true and not boxes[1].checked, "the boxes show the saved state when the panel opens")
 	savedCat.panel.OnDefault()
-	check(next(ShamanKitDB.reserve) == nil, "Defaults clears them")
+	local rv = ShamanKitDB.reserve
+	check(rv[1] and rv[2] and rv[3] and rv[4], "Defaults puts back the shipped setting: every place kept open")
+	ShamanKitDB.reserve = {}
 
 	-- damaged saved data
 	for label, bad in pairs({ ["a string"] = "x", ["yes/no text"] = { [2] = "yes", [3] = 0 }, ["a number"] = 7 }) do
 		ShamanKitDB.reserve = bad
 		fire("PLAYER_ENTERING_WORLD"); ns.fixReserve()
 		local r = ShamanKitDB.reserve
-		check(type(r) == "table" and r[2] == nil and r[3] == nil, "damaged reserve (" .. label .. ") is cleaned")
+		if type(bad) == "table" then
+			check(type(r) == "table" and r[2] == nil and r[3] == nil, "damaged reserve (" .. label .. ") is cleaned")
+		else
+			check(type(r) == "table" and r[1] == true and r[2] == true and r[3] == true and r[4] == true, "damaged reserve (" .. label .. ") falls back to the shipped setting")
+		end
 	end
 	ShamanKitDB.reserve = {}; ShamanKitDB.distanceMode = "off"; ns.apply(); out()
 end
@@ -882,7 +904,7 @@ do
 	remBox.checked = true; remBox.scripts.OnClick(remBox)
 	check(ShamanKitDB.rememberLast == true, "...and on")
 	ShamanKitDB.hold.choice[2] = 5730; savedCat.panel.OnDefault()
-	check(next(ShamanKitDB.hold.choice) == nil and next(ShamanKitDB.reserve) == nil and ShamanKitDB.rememberLast == true, "Defaults clears locked totems and reserved spaces, remembering back on")
+	check(next(ShamanKitDB.hold.choice) == nil and ShamanKitDB.reserve[1] == true and ShamanKitDB.reserve[4] == true and ShamanKitDB.rememberLast == true, "Defaults clears locked totems, keeps every place open, remembering back on")
 	ShamanKitDB.reserve = {}; ShamanKitDB.hold = nil; ns.fixHold(); out()
 end
 
@@ -3215,6 +3237,37 @@ do
 	for _, l in ipairs(lines) do if l:find("weapon: ok") then sawW = true end if l:find("Lightning Shield: false") then sawS = true end end
 	check(sawW and sawS, "status: lists the weapon and the shield readings")
 	noErrors("icons: no error line in the log after all of that")
+end
+
+-- what ships: the author's own layout (a fresh install gets this; saved settings are never overwritten)
+do
+	local want = {
+		size = 46, spacing = 6, showRange = false, showOut = false, tint = true, showTimer = true, vertical = false, locked = true,
+		distanceMode = "bar", rangeByBuff = true, leftCast = true, rememberLast = true, attach = false, attachX = 75, attachY = 16,
+		point = "BOTTOM", relPoint = "BOTTOM", x = 2, y = 196.5,
+		weaponOn = true, weaponMode = "missing", shieldOn = true, auxAnchor = "free", auxSide = "auto", auxAlign = "start", auxScale = 50,
+		auxWarnMin = 2, auxPoint = "BOTTOM", auxRelPoint = "BOTTOM", auxX = -350, auxY = 330,
+		cureOn = true, cureBars = true, cureRow = true, cureAlways = false, cureClick = true, cureCount = true, curePulse = true,
+		cureWash = true, cureWashAlpha = 65, cureSize = 29, cureSpacing = 4, curePoint = "BOTTOM", cureRelPoint = "BOTTOM", cureX = -482, cureY = 337,
+		callOn = false, callTotemic = true, callRecall = false, callShow = "bar", callScale = 55, callSide = "right", callAnchor = "bar", callAlign = "start", callChoice = 0,
+		posCallOwn = true, posCallSide = "left", posCallAlign = "start", posTotemicOwn = true, posTotemicSide = "top", posTotemicAlign = "center",
+		posRecallOwn = true, posRecallSide = "right", posRecallAlign = "start",
+	}
+	local bad = {}
+	for k, v in pairs(want) do if SHIPPED[k] ~= v then bad[#bad + 1] = k .. "=" .. tostring(SHIPPED[k]) end end
+	check(#bad == 0, "shipped defaults are the author's layout" .. (#bad > 0 and (": " .. table.concat(bad, ", ")) or ""))
+	local r = ns.defaultReserve()
+	check(r[1] and r[2] and r[3] and r[4], "shipped: every place on the bar is kept open")
+	local o = ns.defaultOrder()
+	check(o[1] == 2 and o[2] == 1 and o[3] == 3 and o[4] == 4, "shipped: earth, fire, water, air")
+	-- a fresh install: nothing saved yet gets all of it, and a saved value is never replaced
+	for k, v in pairs(SHIPPED) do ns.defaults[k] = v end
+	ShamanKitDB = nil
+	fire("ADDON_LOADED", "ShamanKit")
+	check(ShamanKitDB.size == 46 and ShamanKitDB.callTotemic == true and ShamanKitDB.cureSize == 29 and ShamanKitDB.reserve[3] == true, "fresh install: gets the shipped layout")
+	ShamanKitDB = { size = 50, reserve = {} }
+	fire("ADDON_LOADED", "ShamanKit")
+	check(ShamanKitDB.size == 50 and ShamanKitDB.spacing == 6 and next(ShamanKitDB.reserve) == nil, "existing install: saved values stay, missing ones are filled")
 end
 
 check(#printedErrors == 0, "the addon never printed an error line during the whole run" .. (printedErrors[1] and (": " .. printedErrors[1]) or ""))
