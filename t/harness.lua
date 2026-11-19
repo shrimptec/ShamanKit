@@ -3314,6 +3314,33 @@ do
 	check(not S.boxes["8076b"].c.shown and S.nboxes == 2, "badges: a damage totem has no buff badge")
 	totems[1] = nil; fire("PLAYER_TOTEM_UPDATE", 1); settle()
 
+	-- a kept place that waits for a totem already carries that totem's buff picture, so a totem dropped in a FIGHT
+	-- (when nothing can be anchored) already has it (reported: no picture until the fight ended)
+	do
+		local keepR, keepC = ShamanKitDB.reserve, ShamanKitDB.hold.choice[2]
+		ShamanKitDB.reserve = { [2] = true }; ShamanKitDB.hold.choice[2] = 8075
+		totems[2] = nil; fire("PLAYER_TOTEM_UPDATE", 2); ns.updatePreview(); settle()
+		check(type(ns.castName(2)) == "string" and ns.castName(2):lower():find("strength of earth"), "badges: the kept place knows which totem it waits for (" .. tostring(ns.castName(2)) .. ")")
+		check(S.boxes["8076b"] and S.boxes["8076b"].c.shown and S.boxes["8076b"].c.anchor[2] == btn(2), "badges: ...and carries its buff picture on its place before any totem is out")
+		AURAS_HIDDEN = true; inCombat = true
+		local w = 0
+		for _, bx in pairs(S.boxes) do for _, o in ipairs({ bx.c, bx.button }) do
+			local orig = o.SetPoint; rawset(o, "SetPoint", function(...) w = w + 1; return orig(...) end)
+			local oShow = o.Show; rawset(o, "Show", function(...) w = w + 1; return oShow(...) end)
+		end end
+		totems[2] = { name = "Strength of Earth Totem", start = t, dur = 300, icon = 8 }
+		fire("PLAYER_TOTEM_UPDATE", 2); settle(); ns.badgeApply()
+		check(w == 0 and S.boxes["8076b"].c.shown and S.boxes["8076b"].c.anchor[2] == btn(2), "badges: dropped in a fight: the picture is already in place, nothing was touched (" .. w .. ")")
+		for _, bx in pairs(S.boxes) do for _, o in ipairs({ bx.c, bx.button }) do rawset(o, "SetPoint", nil); rawset(o, "Show", nil) end end
+		AURAS_HIDDEN = false; inCombat = false
+		fire("PLAYER_REGEN_ENABLED"); settle()
+		-- a place that is not kept and has no totem has nothing to hang it on
+		ShamanKitDB.reserve = {}; totems[2] = nil; fire("PLAYER_TOTEM_UPDATE", 2); ns.updatePreview(); settle()
+		check(not S.boxes["8076b"].c.shown, "badges: no kept place and no totem: no picture")
+		ShamanKitDB.reserve, ShamanKitDB.hold.choice[2] = keepR, keepC
+		totems[2] = nil; fire("PLAYER_TOTEM_UPDATE", 2); ns.updatePreview(); settle()
+	end
+
 	-- the same totem again, in a fight: nothing is touched until it ends
 	totems[2] = { name = "Strength of Earth Totem", start = t, dur = 300, icon = 8 }
 	AURAS_HIDDEN = true; inCombat = true

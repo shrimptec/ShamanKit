@@ -170,6 +170,14 @@ local function place(box, b, s)
 	end)
 end
 
+-- the buff name of the totem a place is waiting for (what its picture shows), or nil
+local function expectedAura(slot)
+	local n = ns.castName and ns.castName(slot)
+	if type(n) ~= "string" or n == "" then return nil end
+	local _, aura = ns.classify(n)
+	return aura
+end
+
 -- the whole pass (out of combat, auras not hidden): which totems get a badge, which spell ids, how big
 local function apply()
 	if not db then return end
@@ -184,17 +192,32 @@ local function apply()
 		for slot = 1, SLOTS do
 			local b = ns.barButton and ns.barButton(slot)
 			local st = ns.barState and ns.barState(slot)
-			local set = (b and b:IsShown() and st and st.aura) and idsFor(st.aura) or nil
-			if set then
-				local tex = follow and b.icon and b.icon:GetTexture() or nil
-				local full = iconSize(b)
-				local okAll = true
-				for _, id in ipairs(sorted(set)) do
-					local bkey = id .. (follow and "f" or "b")
-					if not S.boxes[bkey] then makeBox(id, follow, tex, full) end
-					if S.boxes[bkey] and not want[bkey] then want[bkey] = b else okAll = false end
+			-- the totem that is out, and the one this place is waiting for (a kept place shows it): a totem dropped in a
+			-- fight finds its buff picture already in place, because nothing can be anchored in a fight
+			local names = {}
+			-- every slot's button has its own fixed spot even while hidden (a totem that appears in a fight lands exactly
+			-- there), so a kept place can carry the picture before any totem is out
+			local reserve = ns.fixReserve and ns.fixReserve() or {}
+			local shown = b and b:IsShown()
+			local anchor = b and (shown or reserve[slot]) and b or nil
+			if anchor then
+				if st and st.aura and shown then names[#names + 1] = st.aura end
+				local expect = expectedAura(slot)
+				if expect and expect ~= (st and st.aura and shown and st.aura) then names[#names + 1] = expect end
+			end
+			for _, name in ipairs(names) do
+				local set = idsFor(name)
+				if set then
+					local tex = follow and anchor.icon and anchor.icon:GetTexture() or nil
+					local full = iconSize(anchor)
+					local okAll = true
+					for _, id in ipairs(sorted(set)) do
+						local bkey = id .. (follow and "f" or "b")
+						if not S.boxes[bkey] then makeBox(id, follow, tex, full) end
+						if S.boxes[bkey] and not want[bkey] then want[bkey] = anchor else okAll = false end
+					end
+					if follow and okAll and st and name == st.aura then armed[slot] = st.aura end
 				end
-				if follow and okAll then armed[slot] = st.aura end
 			end
 		end
 	end
