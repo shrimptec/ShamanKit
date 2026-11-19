@@ -270,6 +270,7 @@ end
 
 -- Bookkeeping must never stop a totem from being shown: it runs after the icon is up, and a failure is only logged.
 local rememberSafe = guard("remember", remember)
+ns.dbg, ns.guard, ns.isSecret = dbg, guard, isSecret     -- shared with Cures.lua
 
 -- ---- left-click a place to cast the totem it shows
 -- The hit button over each place is a secure button, so the game itself casts: "*type1" = "spell", "*spell1" = the name.
@@ -363,6 +364,8 @@ local function aurasHidden()
 	end
 	return InCombatLockdown() and true or false   -- no such call here: assume a fight hides them
 end
+
+ns.aurasHidden = aurasHidden
 
 -- true / false, or nil when it can't be read
 local function hasAura(name)
@@ -1588,6 +1591,7 @@ local function anyRealTotem()
 end
 
 function ns.updatePreview()
+	if ns.cureApply then ns.cureApply() end
 	applyAttach()
 	applyBarMouse()
 	applyAux()
@@ -1613,6 +1617,7 @@ function ns.resetPosition()
 	db.attachX, db.attachY = d.attachX, d.attachY
 	applyAttach()
 	ns.resetAuxPlace()
+	if ns.cureResetPosition then ns.cureResetPosition() end
 end
 
 function ns.get() return db end
@@ -1741,6 +1746,7 @@ ev:SetScript("OnEvent", guard("event", function(self, event, arg1, ...)
 		fixOrder()
 		fixReserve()
 		fixHold()
+		if ns.cureInit then ns.cureInit() end        -- the Cures module (Cures.lua) starts with the saved settings in
 		self:UnregisterEvent("ADDON_LOADED")
 		if InCombatLockdown() then
 			-- secure buttons can't be made in combat: build when it ends
@@ -1848,8 +1854,11 @@ SLASH_SHAMANKIT1 = "/shamankit"
 SLASH_SHAMANKIT2 = "/totemrange"   -- the name this addon had before ShamanKit
 SLASH_SHAMANKIT3 = "/trange"
 SlashCmdList.SHAMANKIT = function(msg)
-	msg = (msg or ""):lower():match("^%s*(%S*)")
-	if msg == "unlock" or msg == "lock" then
+	local rest
+	msg, rest = (msg or ""):lower():match("^%s*(%S*)%s*(.-)%s*$")
+	if msg == "cures" or msg == "cure" then
+		if ns.cureSlash then ns.cureSlash(rest) end
+	elseif msg == "unlock" or msg == "lock" then
 		db.locked = msg == "lock"
 		ns.updatePreview()
 		print("|cff33ff99ShamanKit|r: frame " .. (db.locked and "locked" or "unlocked - open /shamankit to see and drag it"))

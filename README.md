@@ -9,9 +9,13 @@ Small helpers for shamans, for World of Warcraft: Forever, in the default UI sty
   about to run out), or, if you prefer, shows which enchant is on and its time left, like the shield icon (main hand,
   hidden when dead, with no weapon or a fishing pole). The other icon shows your Lightning Shield charges while it is up. They can hang on the totem bar or the player frame (any side, any alignment, nudge and size are settings)
   or sit in a place of their own that you drag.
+- **Cures**: Cure Disease (tan), Cure Poison (green) and, for an Orc, Shatter Curse (purple) light up, on the action bar
+  buttons that hold them and in an optional small icon row, while a debuff they can remove is on you. The game draws the
+  highlight (an aura container), so it works in a fight too. Own settings page; it can be switched off. Replaces the
+  separate CureWatch addon (ShamanKit stays off while CureWatch is installed).
 
-Settings: Esc > Options > AddOns > ShamanKit (a home page and three pages: Totem bar, Totems, Buffs), or `/shamankit`.
-`/shamankit buffs` (or `bar`, `totems`) opens a page, `/shamankit lock | unlock` locks or unlocks the frames,
+Settings: Esc > Options > AddOns > ShamanKit (a home page and four pages: Totem bar, Totems, Buffs, Cures), or `/shamankit`.
+`/shamankit buffs` (or `bar`, `totems`, `cures`) opens a page, `/shamankit cures test` lights the cures for a few seconds, `/shamankit lock | unlock` locks or unlocks the frames,
 `/shamankit reset` puts the bar and the icons back in their usual place, and `/shamankit status` prints what the addon
 reads for the totems and the buff icons. `/totemrange` still works too.
 

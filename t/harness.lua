@@ -55,6 +55,15 @@ local function mock(kind)
 		if k == "SetCooldown" then return function(self, s, d) self.cd = { s, d } end end
 		if k == "GetPoint" then return function() return "CENTER", nil, "CENTER", 10, 20 end end
 		if k == "CreateTexture" or k == "CreateFontString" then return function() return mock("region") end end
+		if k == "CreateAnimationGroup" then
+			return function()
+				local g = mock("anim")
+				rawset(g, "Play", function(s) s.playing = true end)
+				rawset(g, "Stop", function(s) s.playing = false end)
+				rawset(g, "CreateAnimation", function() return mock("animation") end)
+				return g
+			end
+		end
 		if type(k) == "string" and k:match("^%u") then return function() end end   -- methods are Capitalised; fields are nil, as on real frames
 		return nil
 	end })
@@ -67,6 +76,8 @@ C_AddOns = { IsAddOnLoaded = function(n) return LOADED_ADDONS[n] end, LoadAddOn 
 local function auraButton()
 	local b = mock("auraButton")
 	rawset(b, "SetIcon", function(self, tex) self.iconTex = tex end)
+	rawset(b, "ClearAllPoints", function(self) self.anchor = nil end)
+	rawset(b, "ClearApplicationCount", function(self) self.countFS, self.countOpts = nil, nil; self.cleared = (self.cleared or 0) + 1 end)
 	rawset(b, "SetApplicationCount", function(self, fs, opts)
 		if opts and opts.formatter and BAD_FORMATTER then error("bad options") end
 		self.countFS, self.countOpts = fs, opts
@@ -89,6 +100,11 @@ function CreateFrame(kind, name, parent, tmpl)
 		else
 			rawset(f, "AddAuraSlot", false)
 		end
+		rawset(f, "SetAuraSlotCandidateFilters", function(self, key, filters)
+			self.filters = self.filters or {}
+			self.filters[key] = filters
+			self.filterWrites = (self.filterWrites or 0) + 1
+		end)
 		rawset(f, "AddAuraGroup", function(self, key, filter, opts)
 			self.groups = self.groups or {}
 			self.groups[key] = { filter = filter, opts = opts }
@@ -106,9 +122,12 @@ UIParent = mock("UIParent")
 PlayerFrame = mock("PlayerFrame")
 TotemFrame = mock("TotemFrame"); TotemFrame.alpha = 1
 local hooks = {}
+function PlaceAction() end
+function PickupAction() end
 function hooksecurefunc(obj, name, fn)
+	if type(obj) == "string" then fn, name, obj = name, obj, _G end   -- hooksecurefunc("Name", fn)
 	local orig = obj[name]
-	rawset(obj, name, function(self, ...) orig(self, ...); fn(self, ...) end)
+	rawset(obj, name, function(...) if orig then orig(...) end; fn(...) end)
 end
 GameTooltip = mock("tt"); GameTooltip_Hide = function() end
 SOUNDKIT = {}; PlaySound = function() end
@@ -167,7 +186,12 @@ C_UnitAuras = {
 	-- in a fight (proved by the real log) the data lookups all answer nothing: by name, by id, by index.
 	-- Still answered: the list of buff ids (plain numbers) and the count text (a string the addon can't read).
 	GetAuraDataByAuraInstanceID = function(_, id) if AURAS_HIDDEN then return nil end return IDAURAS[id] end,
-	GetAuraDataByIndex = function(_, i)
+	GetAuraDataByIndex = function(_, i, filter)
+		if filter == "HARMFUL" then
+			DEBUFF_READS = (DEBUFF_READS or 0) + 1
+			if AURAS_HIDDEN then error("Auras cannot be accessed when secret while tainted by 'ShamanKit'") end
+			return DEBUFFS and DEBUFFS[i]
+		end
 		if AURAS_HIDDEN then return nil end
 		local list = {}
 		for _, d in pairs(IDAURAS) do list[#list + 1] = d end
@@ -217,13 +241,15 @@ Settings = {
 }
 SlashCmdList = {}
 local timers = {}
-C_Timer = { After = function(_, fn) timers[#timers + 1] = fn end }
+C_Timer = { After = function(_, fn) timers[#timers + 1] = fn end, NewTicker = function(_, fn) TICKERS = TICKERS or {}; TICKERS[#TICKERS + 1] = fn; return {} end }
 local function runTimers() local t = timers; timers = {}; for _, fn in ipairs(t) do fn() end end
 
 local ns = {}
 local function load(file) local f = assert(loadfile(file)); f("ShamanKit", ns) end
 load("ShamanKit/ShamanKit.lua")
+load("ShamanKit/Cures.lua")
 load("ShamanKit/Options.lua")
+load("ShamanKit/CureOptions.lua")
 
 local ev
 for _, f in ipairs(frames) do if f.scripts.OnEvent then ev = f end end
@@ -245,7 +271,7 @@ fire("ADDON_LOADED", "ShamanKit")
 rawset(_G.ShamanKitBar, "protected", true)
 check(ShamanKitDB and ShamanKitDB.size == 36, "defaults filled")
 check(savedCat ~= nil, "settings category registered")
-check(#allCats == 4, "settings: a home page and three sub-pages (" .. #allCats .. " registered)")
+check(#allCats == 5, "settings: a home page and four sub-pages (" .. #allCats .. " registered)")
 -- the older checks talk to "the panel": that is now all three pages at once
 do
 	local pages = {}
@@ -1126,6 +1152,417 @@ do
 end
 
 -- ---- weapon enchant + Lightning Shield icons
+-- ---- Cures: the cure spells light up while something they can remove is on you (Cures.lua)
+do
+	local db = ShamanKitDB
+	local S = ns.cureState
+	local P = "ShamanKitCure_"
+	-- this pretend client
+	KNOWN_SPELLS[526] = "Cure Poison"; KNOWN_SPELLS[2870] = "Cure Disease"; KNOWN_SPELLS[1299026] = "Shatter Curse"
+	CURE_KNOWN = { [526] = true, [2870] = true, [1299026] = true }
+	C_SpellBook = { IsSpellKnown = function(id) return CURE_KNOWN[id] == true end }
+	local raceFile = "Orc"
+	function UnitRace() return raceFile, raceFile, 2 end
+	DebuffTypeColor = { Poison = { r = 0, g = 0.6, b = 0 }, Disease = { r = 0.6, g = 0.4, b = 0 }, Curse = { r = 0.6, g = 0, b = 1 } }
+	ACTIONS, MACROS, COOLDOWNS = {}, {}, {}
+	function GetActionInfo(slot) local a = ACTIONS[slot]; if a then return a[1], a[2] end end
+	function GetMacroSpell(i) return MACROS[i] end
+	C_Spell.GetSpellCooldown = function(id) return COOLDOWNS[id] end
+	local buttons = {}
+	for _, prefix in ipairs({ "ActionButton", "MultiBarBottomLeftButton" }) do
+		for i = 1, 12 do
+			local b = CreateFrame("CheckButton", prefix .. i)
+			b.action = #buttons + 1
+			rawset(b, "GetWidth", function() return 40 end)
+			buttons[#buttons + 1] = b
+		end
+	end
+	local function btn(n) return buttons[n] end
+	local function cont() return S.container end   -- the module's current container (an older one may be left in `frames`)
+	local function slotBtn(name) local c = cont(); return c and c.slots[name] and c.slots[name].button end
+	local function types(name) local c = cont(); local f = (c.filters and c.filters[name]) or c.slots[name].opts.candidateFilters; return f.includeDispelTypes end
+	local function empty(tb) return next(tb) == nil end
+	local function parked(b) return b.anchor ~= nil and b.anchor[2] == UIParent and b.anchor[4] == -9000 end
+	local function lines(pat) local n = 0; for _, l in ipairs(db.log or {}) do if l:find(pat) then n = n + 1 end end return n end
+	local function settle() runTimers() end
+	-- the Cures module listens on a frame of its own: find it by the events it registered
+	local cf
+	for _, f in ipairs(frames) do if f.registered and f.registered.ACTIONBAR_SLOT_CHANGED and f.registered.UNIT_AURA then cf = f end end
+	assert(cf, "the Cures frame registered its events")
+	local function cfire(e, ...) cf.scripts.OnEvent(cf, e, ...) end
+	local function both(e, ...) fire(e, ...); cfire(e, ...) end
+	local function reset()
+		inCombat = false; AURAS_HIDDEN = false; secretPos = false; S.scheduled = false
+		CONTAINER_FAILS = false; NO_SLOTS = false; DEBUFFS = {}; ns.curesPageOpen = false
+		S.testKey = nil
+		db.cureOn, db.cureBars, db.cureRow, db.cureAlways, db.locked = true, true, true, false, true
+		db.cureSize, db.cureSpacing, db.cureWash, db.cureWashAlpha, db.curePulse, db.cureCount = 36, 4, true, 30, true, true
+	end
+
+	reset(); db.log = {}
+	for i = 1, #buttons do ACTIONS[i] = { "spell", 8075 } end            -- every button holds some other spell
+	check(db.cureOn == true and db.cureBars == true and db.cureRow == true and db.cureAlways == false and db.cureSize == 36, "cures: defaults are on, row hidden until something is on you")
+	check(ns.defaults.cureCount == true and ns.defaults.curePulse == true and ns.defaults.cureWash == true, "cures: the look defaults")
+	-- the module started at load with a client that refused the container: start over with one that has it
+	S.container, S.failed, S.knownDirty = nil, false, true
+	ns.cureApply()
+	local c = cont()
+	check(c ~= nil, "cures: an aura container is made (out of combat)")
+	check(c.unit == "player" and c.enabled == true and c.shown == true, "cures: it watches the player and is on")
+	check(LOADED_ADDONS.Blizzard_AuraContainer, "cures: the game's aura container addon is loaded first")
+	check(S.known.poison and S.known.disease and S.known.curse, "cures: the three cures are known")
+
+	-- the row: one slot per cure, limited to its dispel type by NAME, over its cell
+	local poi, dis, cur = slotBtn(P .. "poison_row1"), slotBtn(P .. "disease_row1"), slotBtn(P .. "curse_row1")
+	check(poi and dis and cur, "cures: a game-drawn slot in the row for each cure you have")
+	check(c.slots[P .. "poison_row1"].filter == "HARMFUL", "cures: debuffs only")
+	local tp, td, tc = types(P .. "poison_row1"), types(P .. "disease_row1"), types(P .. "curse_row1")
+	check(tp.Poison and not tp.Disease and not tp.Curse and td.Disease and not td.Poison, "cures: the poison slot takes poison only, the disease slot disease only")
+	check(tc.Curse and tc.Bane and not tc.Poison, "cures: the curse slot takes a Curse and a Bane")
+	check(poi.anchor and poi.anchor[1] == "CENTER" and poi.anchor[2] == S.cells.poison, "cures: the slot sits over its cell")
+	check(poi.sizeAtInit and poi.sizeAtInit > 0, "cures: the button is given a size when it is made (without one it is invisible)")
+	check(poi.w == 36 and poi.h == 36, "cures: and sized to the row icon")
+	check(poi.countFS ~= nil and poi.iconTex == nil, "cures: the game writes the stack count; the picture is the cure's own, not the debuff's")
+	local parts = S.rowSlots.poison.parts
+	check(parts.glow.color[1] == 0 and parts.glow.color[2] == 0.6 and parts.glow.color[3] == 0, "cures: the glow is the game's poison green")
+	check(parts.icon.tex == 100000 + 526, "cures: the row icon is the cure spell's picture")
+	check(parts.pulse and parts.pulse.playing == true, "cures: the border pulses")
+	check(parts.wash.shown and parts.wash.alpha == 0.3, "cures: a 30% wash in the colour")
+	check(S.cells.poison.shown == false and S.cells.poison.mouse == false, "cures: the plain cells stay hidden (nothing is on you): only the game's slot can show")
+	check(not (S.plainRow.poison and S.plainRow.poison.shown), "cures: no plain stand-in frame is lit with the container working")
+	check(DEBUFF_READS == nil or DEBUFF_READS >= 0, "cures: (the backup reading may run out of combat)")
+
+	-- keep the row on screen
+	db.cureAlways = true; ns.cureApply()
+	check(S.cells.poison.shown and S.cells.disease.shown and S.cells.curse.shown, "cures: always show: the three dim cells are there")
+	check(S.cells.disease.anchor[4] == 0 and S.cells.poison.anchor[4] == 40 and S.cells.curse.anchor[4] == 80, "cures: laid out disease, poison, curse, spaced by size + gap")
+	db.cureAlways = false; ns.cureApply()
+	check(not S.cells.poison.shown, "cures: always show off: hidden again")
+	db.cureRow = false; ns.cureApply()
+	check(parked(poi) and empty(types(P .. "poison_row1")), "cures: row off: its slots are emptied and parked off screen")
+	db.cureRow = true; ns.cureApply()
+	check(poi.anchor[2] == S.cells.poison and types(P .. "poison_row1").Poison, "cures: row on again: back in place, filtered again")
+
+	-- a cure you do not have
+	CURE_KNOWN[1299026] = nil; S.knownDirty = true; ns.cureApply()
+	check(S.known.curse == false and parked(cur) and empty(types(P .. "curse_row1")), "cures: no Shatter Curse: no curse slot lights")
+	-- a client that cannot say: a racial belongs to its race
+	C_SpellBook.IsSpellKnown = function() return nil end
+	S.knownDirty = true; ns.cureApply()
+	check(S.known.curse == true, "cures: the client can't say, and an Orc has the racial")
+	raceFile = "Human"; S.knownDirty = true; ns.cureApply()
+	check(S.known.curse == false, "cures: ...a Human does not")
+	raceFile = "Orc"
+	C_SpellBook.IsSpellKnown = function(id) return CURE_KNOWN[id] == true end
+	CURE_KNOWN[1299026] = true; S.knownDirty = true; ns.cureApply()
+	check(S.known.curse == true and types(P .. "curse_row1").Curse, "cures: back")
+
+	-- the action bars
+	ACTIONS[3] = { "spell", 526 }                  -- Cure Poison on button 3
+	ACTIONS[5] = { "macro", 7 }; MACROS[7] = "Cure Disease"   -- a macro that casts Cure Disease on button 5
+	cfire("ACTIONBAR_SLOT_CHANGED", 3); settle()
+	local o1, o2 = slotBtn(P .. "poison_bar1"), slotBtn(P .. "disease_bar1")
+	check(o1 and o1.anchor[2] == btn(3) and types(P .. "poison_bar1").Poison, "cures: the button holding Cure Poison gets a poison overlay")
+	check(o2 and o2.anchor[2] == btn(5) and types(P .. "disease_bar1").Disease, "cures: a macro that casts Cure Disease gets a disease overlay")
+	check(o1.w == 40 and o1.h == 40, "cures: sized to the button")
+	check(S.rowSlots.poison.parts ~= S.assigned[btn(3)].parts and S.assigned[btn(3)].parts.icon == nil, "cures: an overlay has no picture of its own, only the wash and glow")
+	check(slotBtn(P .. "poison_bar2") == nil and slotBtn(P .. "disease_bar2") == nil, "cures: no more overlays than there are buttons")
+	local n = 0; for _ in pairs(S.assigned) do n = n + 1 end
+	check(n == 2, "cures: other spells light nothing")
+	check(lines("CURES action bars: ActionButton3>poison,ActionButton5>disease") == 1, "cures: the log names the buttons it matched")
+
+	-- the same cure on two buttons
+	ACTIONS[9] = { "spell", 526 }; cfire("ACTIONBAR_SLOT_CHANGED", 9); settle()
+	local o3 = slotBtn(P .. "poison_bar2")
+	check(o3 and o3.anchor[2] == btn(9) and types(P .. "poison_bar2").Poison and o1.anchor[2] == btn(3), "cures: a second button with the same cure gets its own overlay, the first stays")
+	-- the spell is dragged away: its overlay is released, the other stays
+	ACTIONS[3] = { "spell", 8075 }; cfire("ACTIONBAR_SLOT_CHANGED", 3); settle()
+	check(parked(o1) and empty(types(P .. "poison_bar1")), "cures: the spell moved off the button: its overlay is emptied and parked")
+	check(o3.anchor[2] == btn(9) and types(P .. "poison_bar2").Poison, "cures: the other button is still lit")
+	-- dragged to a new button without any event: the drag hook and the slow check catch it
+	ACTIONS[3] = { "spell", 526 }; PlaceAction(3); settle()
+	check(o1.anchor[2] == btn(3) and types(P .. "poison_bar1").Poison, "cures: a drag (PlaceAction) re-reads the bars")
+	ACTIONS[3] = { "spell", 8075 }
+	check(TICKERS and #TICKERS >= 1, "cures: a slow backstop ticker is running")
+	for _, tick in ipairs(TICKERS) do tick() end; settle()
+	check(parked(o1), "cures: the backstop finds a change that sent no event")
+	for _ = 1, 3 do for _, tick in ipairs(TICKERS) do tick() end end
+	check(#timers == 0, "cures: ...and does nothing when nothing changed")
+	ACTIONS[3] = { "spell", 526 }; cfire("ACTIONBAR_SLOT_CHANGED", 3); settle()
+
+	-- more buttons than overlays per cure: capped, said in the log
+	for i = 13, 24 do ACTIONS[i] = { "spell", 526 } end
+	ns.cureApply()
+	local pool = 0; for k in pairs(c.slots) do if k:find(P .. "poison_bar") then pool = pool + 1 end end
+	check(pool == 8 and lines("no free overlay for poison") >= 1, "cures: at most 8 overlays per cure, the rest said in the log")
+	for i = 13, 24 do ACTIONS[i] = { "spell", 8075 } end
+	ACTIONS[9] = { "spell", 8075 }
+	ns.cureApply()
+	local on = 0; for _, rec in pairs(S.assigned) do on = on + 1 end
+	check(on == 2, "cures: back to two lit buttons (button 3 poison, button 5 disease)")
+
+	-- bars off
+	db.cureBars = false; ns.cureApply()
+	check(parked(o1) and parked(o2) and next(S.assigned) == nil, "cures: bars off: no overlay is left lit")
+	db.cureBars = true; ns.cureApply()
+	check(o1.anchor[2] == btn(3), "cures: bars on again")
+
+	-- ------------------------------------------------ a fight: nothing the game restricts is touched
+	local framesBefore, writes, reads = #frames, c.filterWrites, DEBUFF_READS or 0
+	local anchorBefore = o1.anchor
+	inCombat = true; AURAS_HIDDEN = true; both("PLAYER_REGEN_DISABLED")
+	ACTIONS[3] = { "spell", 8075 }
+	for _, e in ipairs({ "UNIT_AURA", "ACTIONBAR_SLOT_CHANGED", "SPELL_UPDATE_COOLDOWN", "ACTIONBAR_PAGE_CHANGED", "SPELLS_CHANGED" }) do cfire(e, "player") end
+	PlaceAction(3)
+	settle()
+	for _, tick in ipairs(TICKERS) do tick() end; settle()
+	check(#frames == framesBefore, "cures fight: no frame is made")
+	check(c.filterWrites == writes and o1.anchor == anchorBefore and o1.anchor[2] == btn(3), "cures fight: no slot is re-filtered, moved or released")
+	check((DEBUFF_READS or 0) == reads, "cures fight: the debuffs are not read (the game would refuse)")
+	check(c.enabled == true and c.shown == true and types(P .. "poison_bar1").Poison, "cures fight: the game-drawn overlays stay armed: the game lights them when a poison lands")
+	db.cureSize = 50; ns.updatePreview(); settle()
+	check(S.rowSlots.poison.w == 36 and poi.w == 36, "cures fight: a size change waits")
+	ns.cureTest("all")
+	check(S.testKey == nil, "cures fight: a test is refused")
+	inCombat = false; AURAS_HIDDEN = false; both("PLAYER_REGEN_ENABLED"); settle()
+	check(S.rowSlots.poison.w == 50 and parked(o1) , "cures fight: afterwards the size change and the moved spell are applied")
+	db.cureSize = 36; ACTIONS[3] = { "spell", 526 }; ns.cureApply()
+
+	-- the game hides auras though no fight is on (an encounter): wait, then do it
+	AURAS_HIDDEN = true; db.cureSpacing = 10; ns.cureApply()
+	check(S.pending == true, "cures: auras hidden out of combat: the change waits")
+	AURAS_HIDDEN = false; settle(); ns.cureApply()
+	check(S.pending == false and S.cells.poison.anchor ~= nil, "cures: ...and is done once they are readable")
+	db.cureSpacing = 4; ns.cureApply()
+
+	-- ------------------------------------------------ the backup reading (out of combat only)
+	db.log = {}
+	DEBUFFS = { { dispelName = "Poison" }, { dispelName = "Magic" }, { dispelName = "Poison" } }
+	cfire("UNIT_AURA", "player"); settle()
+	check(S.reader.lit.poison == true and S.reader.count.poison == 2 and S.reader.lit.disease == false, "cures: reading: two poisons, no disease")
+	check(lines("CURES debuff types on you: Magic=1 Poison=2") == 1, "cures: the log names the dispel types the game reported")
+	cfire("UNIT_AURA", "player"); settle()
+	check(lines("CURES debuff types on you") == 1, "cures: ...only when they change")
+	DEBUFFS = { { dispelName = "Bane" } }; cfire("UNIT_AURA", "player"); settle()
+	check(S.reader.lit.curse == true and S.reader.lit.poison == false, "cures: a Bane counts as a curse")
+	DEBUFFS = { { dispelName = secret() } }; local litBefore = S.reader.lit.curse
+	cfire("UNIT_AURA", "player"); settle()
+	check(S.reader.lit.curse == litBefore, "cures: a hidden type is never read as 'nothing': the last reading stays")
+	DEBUFFS = { secret() }; S.reader.lit.curse = true
+	cfire("UNIT_AURA", "player"); settle()
+	check(S.reader.lit.curse == true, "cures: a hidden aura entry is never read as 'nothing' either")
+	DEBUFFS = {}; cfire("UNIT_AURA", "player"); settle()
+	check(S.reader.lit.curse == false and lines("debuff types on you: none") == 1, "cures: nothing on you: nothing lit")
+	local burst = DEBUFF_READS
+	for _ = 1, 50 do cfire("UNIT_AURA", "player") end
+	check(#timers == 1, "cures: a burst of aura events becomes one pass")
+	settle()
+	check(DEBUFF_READS - burst <= 2, "cures: ...and one reading (" .. (DEBUFF_READS - burst) .. " calls)")
+
+	-- ------------------------------------------------ the settings preview and the test (plain frames)
+	check(S.plainRow.poison == nil or not S.plainRow.poison.shown, "cures: nothing plain is lit at rest")
+	ns.curesPageOpen = true; ns.cureApply()
+	check(S.plainRow.poison.shown and S.plainRow.disease.shown and S.plainRow.curse.shown, "cures: settings page open and nothing on you: the row shows all three lit")
+	check(S.plainBar[btn(3)].shown and S.plainBar[btn(5)].shown, "cures: ...and the buttons that hold a cure")
+	check(S.plainBar[btn(3)].parts.glow.color[2] == 0.6, "cures: lit in the affliction's colour")
+	DEBUFFS = { { dispelName = "Poison" } }; cfire("UNIT_AURA", "player"); settle()
+	check(not S.plainRow.poison.shown and not S.plainBar[btn(3)].shown, "cures: a real poison arrives: the preview steps aside (the game's own overlay shows)")
+	DEBUFFS = {}; cfire("UNIT_AURA", "player"); settle()
+	check(S.plainRow.poison.shown, "cures: ...and is back when it goes")
+	ns.curesPageOpen = false; ns.cureApply()
+	check(not S.plainRow.poison.shown and not S.plainBar[btn(3)].shown, "cures: page closed: gone")
+	ns.cureTest("poison")
+	check(S.plainRow.poison.shown and not S.plainRow.disease.shown and S.plainBar[btn(3)].shown and not S.plainBar[btn(5)].shown, "cures: test poison: only poison is lit, on the row and on its button")
+	ns.cureTest("all")
+	check(S.plainRow.disease.shown and S.plainRow.curse.shown and S.plainBar[btn(5)].shown, "cures: test all")
+	ns.cureTest("clear")
+	check(S.testKey == nil and not S.plainRow.poison.shown and not S.plainRow.disease.shown and not S.plainBar[btn(3)].shown, "cures: test clear")
+	ns.cureTest("curse")
+	settle()
+	check(S.testKey == nil and not S.plainRow.curse.shown, "cures: a test ends by itself after a few seconds")
+	ns.cureTest("all"); inCombat = true; both("PLAYER_REGEN_DISABLED")
+	check(S.testKey == nil and not S.plainRow.poison.shown and not S.plainBar[btn(3)].shown, "cures: a fight starting ends a test and puts its frames away")
+	inCombat = false; both("PLAYER_REGEN_ENABLED"); settle()
+
+	-- ------------------------------------------------ unlocked: drag the row
+	db.locked = false; ns.cureApply()
+	check(S.cells.poison.shown and S.cells.poison.mouse == true, "cures: unlocked: the cells are there to grab")
+	local moved = 0
+	local row = S.row
+	rawset(row, "StartMoving", function() moved = moved + 1 end)
+	S.cells.poison.scripts.OnDragStart(S.cells.poison)
+	S.cells.poison.scripts.OnDragStop(S.cells.poison)
+	check(moved == 1 and db.curePoint == "CENTER" and db.cureX == 10 and db.cureY == 20, "cures: dragging the row saves where it was dropped")
+	db.locked = true; ns.cureApply(); moved = 0
+	S.cells.poison.scripts.OnDragStart(S.cells.poison)
+	check(moved == 0, "cures: locked: a drag moves nothing")
+	inCombat = true; db.locked = false
+	S.cells.poison.scripts.OnDragStart(S.cells.poison)
+	check(moved == 0, "cures: not in a fight either")
+	inCombat = false; db.locked = true
+	ns.cureResetPosition()
+	check(db.curePoint == "CENTER" and db.cureX == 0 and db.cureY == -160, "cures: reset puts the row back")
+
+	-- ------------------------------------------------ the look follows the settings (out of combat)
+	db.cureWashAlpha = 60; ns.cureApply()
+	check(S.rowSlots.poison.parts.wash.alpha == 0.6 and S.assigned[btn(3)].parts.wash.alpha == 0.6, "cures: wash strength changes the row and the overlays")
+	db.cureWash = false; ns.cureApply()
+	check(S.rowSlots.poison.parts.wash.shown == false, "cures: wash off")
+	db.curePulse = false; ns.cureApply()
+	check(S.rowSlots.poison.parts.pulse.playing == false and S.assigned[btn(3)].parts.pulse.playing == false, "cures: pulse off")
+	db.curePulse = true; db.cureWash = true; db.cureWashAlpha = 30; ns.cureApply()
+	check(S.rowSlots.poison.parts.pulse.playing == true and S.rowSlots.poison.parts.wash.shown, "cures: pulse and wash back")
+	db.cureCount = false; ns.cureApply()
+	check(poi.cleared == 1 and S.rowSlots.poison.parts.count.text == "", "cures: count off: the game stops writing the number")
+	db.cureCount = true; ns.cureApply()
+	check(poi.countFS ~= nil, "cures: count on: the game writes it again")
+	db.cureSize = 60; ns.cureApply()
+	check(poi.w == 60 and S.cells.poison.w == 60 and S.assigned[btn(3)].w == 40, "cures: the row size changes, the overlays keep the button's size")
+	db.cureSize = 36; ns.cureApply()
+
+	-- ------------------------------------------------ the cooldown (out of combat)
+	local now = GetTime()
+	COOLDOWNS[526] = { startTime = now - 5, duration = 8 }; cfire("SPELL_UPDATE_COOLDOWN"); settle()
+	check(S.rowSlots.poison.parts.icon.alpha == 0.55 and S.rowSlots.poison.parts.cd.cd[2] == 8, "cures: on cooldown: the row icon is dimmed and sweeps")
+	COOLDOWNS[526] = { startTime = now, duration = 1.5, isOnGCD = true }; cfire("SPELL_UPDATE_COOLDOWN"); settle()
+	check(S.rowSlots.poison.parts.icon.alpha == 1, "cures: the global cooldown does not count")
+	COOLDOWNS[526] = { startTime = now, duration = 8 }; cfire("SPELL_UPDATE_COOLDOWN"); settle()
+	local sw = #frames
+	for _ = 1, 40 do cfire("SPELL_UPDATE_COOLDOWN") end
+	check(#timers == 1, "cures: a burst of cooldown events is one pass")
+	local pointsBefore = CALLS.SetTexture
+	settle()
+	check(CALLS.SetTexture == pointsBefore and #frames == sw, "cures: a cooldown event lays nothing out again (no texture or frame written)")
+	inCombat = true; COOLDOWNS[526] = nil; cfire("SPELL_UPDATE_COOLDOWN"); settle()
+	check(S.rowSlots.poison.parts.icon.alpha == 0.55, "cures fight: the row icon is not touched in a fight")
+	inCombat = false; both("PLAYER_REGEN_ENABLED"); settle()
+	check(S.rowSlots.poison.parts.icon.alpha == 1, "cures: after the fight it is right again")
+
+	-- ------------------------------------------------ no container on this client: plain frames lit by the reading
+	for _, rec in pairs(S.rowSlots) do rec.on = false end
+	S.container, S.failed, S.rowSlots, S.pools, S.assigned = nil, false, {}, {}, {}
+	CONTAINER_FAILS = true; db.log = {}
+	DEBUFFS = { { dispelName = "Disease" } }
+	ns.cureApply(); cfire("UNIT_AURA", "player"); settle()
+	check(S.failed == true and lines("CURES container could not be made") == 1, "cures fallback: the log says the container could not be made")
+	check(S.plainRow.disease and S.plainRow.disease.shown and not (S.plainRow.poison and S.plainRow.poison.shown), "cures fallback: the disease is lit on the row by a plain frame")
+	check(S.cells.disease.shown, "cures fallback: its cell is shown even with 'always show' off")
+	check(S.plainBar[btn(5)] and S.plainBar[btn(5)].shown and not (S.plainBar[btn(3)] and S.plainBar[btn(3)].shown), "cures fallback: and on the button that holds Cure Disease")
+	DEBUFFS = {}; cfire("UNIT_AURA", "player"); settle()
+	check(not S.plainRow.disease.shown and not S.plainBar[btn(5)].shown, "cures fallback: gone when the debuff is")
+	inCombat = true; AURAS_HIDDEN = true; DEBUFFS = { { dispelName = "Poison" } }; cfire("UNIT_AURA", "player"); settle()
+	check(not (S.plainRow.poison and S.plainRow.poison.shown), "cures fallback: in a fight nothing is guessed (the reading is not used)")
+	inCombat = false; AURAS_HIDDEN = false; DEBUFFS = {}
+	CONTAINER_FAILS = false; S.failed = false; both("PLAYER_REGEN_ENABLED"); settle(); ns.cureApply()
+	check(cont() ~= nil and S.container ~= nil and not S.failed, "cures: with a container available again it is used")
+
+	-- ------------------------------------------------ the old addon still installed
+	local realLoaded = C_AddOns.IsAddOnLoaded
+	C_AddOns.IsAddOnLoaded = function(n) if n == "CureWatch" then return true end return realLoaded(n) end
+	local printed = {}
+	local realPrint = print; print = function(...) printed[#printed + 1] = table.concat({ ... }, " ") end
+	ns.cureInit()
+	print = realPrint
+	check(S.conflict == true and #printed == 1 and printed[1]:find("CureWatch"), "cures: CureWatch still installed: one clear message")
+	ns.cureApply()
+	check(parked(S.rowSlots.poison.button or poi) or empty(types(P .. "poison_row1")), "cures: ...and nothing lights while it is (both would light every button)")
+	check(cont().enabled == false and cont().shown == false, "cures: ...the container is switched off")
+	check(ns.cureInfo()[1] ~= nil, "cures: status still answers")
+	C_AddOns.IsAddOnLoaded = realLoaded
+	ns.cureInit(); ns.cureApply()
+	check(S.conflict == false and cont().enabled == true and types(P .. "poison_row1").Poison, "cures: CureWatch gone: lights again")
+
+	-- ------------------------------------------------ the master switch
+	db.cureOn = false; ns.cureApply()
+	check(cont().enabled == false and parked(slotBtn(P .. "poison_row1")) and next(S.assigned) == nil, "cures: off: the container is off and nothing is lit")
+	check(S.cells.poison.shown == false and not (S.plainRow.poison and S.plainRow.poison.shown), "cures: off: nothing plain either")
+	ns.curesPageOpen = true; ns.cureApply()
+	check(not (S.plainRow.poison and S.plainRow.poison.shown), "cures: off: not even the preview")
+	ns.curesPageOpen = false
+	db.cureOn = true; ns.cureApply()
+	check(cont().enabled == true and types(P .. "poison_row1").Poison, "cures: on again")
+
+	-- ------------------------------------------------ the settings page and the commands
+	check(ns.categories and ns.categories.cures ~= nil, "cures settings: a Cures page is registered")
+	local page = savedCat.pages[5]                   -- a page is its panel
+	check(page ~= nil, "cures settings: it is the fifth page (home, totem bar, totems, buffs, cures)")
+	local function boxFor(key) for _, f in ipairs(frames) do if f.settingKey == key and f.parentFrame == page then return f end end end
+	for _, key in ipairs({ "cureOn", "cureBars", "cureRow", "cureAlways", "cureWash", "curePulse", "cureCount" }) do
+		check(boxFor(key) ~= nil, "cures settings: a box for " .. key)
+	end
+	page.OnRefresh()
+	local rowBox, alwaysBox = boxFor("cureRow"), boxFor("cureAlways")
+	poi = slotBtn(P .. "poison_row1")
+	check(rowBox.checked == true and alwaysBox.checked == false, "cures settings: the boxes show what is saved")
+	rowBox:SetChecked(false); rowBox.scripts.OnClick(rowBox)
+	check(db.cureRow == false and parked(poi), "cures settings: unticking the row switches it off at once")
+	check(alwaysBox.enabled == false, "cures settings: ...and greys out what only matters for the row")
+	rowBox:SetChecked(true); rowBox.scripts.OnClick(rowBox)
+	check(db.cureRow == true and alwaysBox.enabled == true and poi.anchor[2] == S.cells.poison, "cures settings: ticking it brings it back")
+	db.cureWashAlpha = 77; db.cureSize = 70; db.cureOn = false
+	page.OnDefault()
+	check(db.cureOn == true and db.cureWashAlpha == 30 and db.cureSize == 36, "cures settings: Defaults restores this page's settings")
+	page.scripts.OnShow()
+	check(ns.curesPageOpen == true, "cures settings: opening the page turns the preview on")
+	page.scripts.OnHide()
+	check(ns.curesPageOpen == false, "cures settings: closing it turns it off")
+	local unlockBox = boxFor("locked")
+	unlockBox:SetChecked(true); unlockBox.scripts.OnClick(unlockBox)
+	check(db.locked == false, "cures settings: the unlock box unlocks the frames")
+	unlockBox:SetChecked(false); unlockBox.scripts.OnClick(unlockBox)
+	check(db.locked == true, "cures settings: and locks them")
+	local testBtns = {}
+	for _, f in ipairs(frames) do if f.testKey and f.parentFrame == page then testBtns[f.testKey] = f end end
+	check(testBtns.poison and testBtns.disease and testBtns.curse and testBtns.all and testBtns.clear, "cures settings: five test buttons")
+	testBtns.poison.scripts.OnClick(testBtns.poison)
+	check(S.testKey == "poison" and S.plainRow.poison.shown, "cures settings: a test button lights it")
+	testBtns.clear.scripts.OnClick(testBtns.clear)
+	check(S.testKey == nil, "cures settings: clear ends it")
+
+	local function say(fn)                         -- what a command prints (print is only swapped while it runs)
+		local out, pr = {}, print
+		print = function(...) out[#out + 1] = table.concat({ ... }, " ") end
+		local ok, err = pcall(fn)
+		print = pr
+		if not ok then error(err, 0) end
+		return out
+	end
+	say(function() SlashCmdList.SHAMANKIT("cures test disease") end)
+	check(S.testKey == "disease" and S.plainRow.disease.shown, "cures slash: /shamankit cures test disease")
+	say(function() SlashCmdList.SHAMANKIT("cures test clear") end)
+	check(S.testKey == nil, "cures slash: ... clear")
+	local out = say(function() SlashCmdList.SHAMANKIT("cures status") end)
+	check(#out >= 6 and out[1]:find("cures: on") and out[2]:find("lit by the game"), "cures slash: status prints the state and where it is lit from")
+	local blob = table.concat(out, "\n")
+	check(blob:find("Cure Poison: you have it, 1 action bar button\n") and blob:find("Cure Disease: you have it, 1 action bar button\n") and blob:find("Shatter Curse: you have it, 0 action bar buttons"), "cures slash: status names each cure and its buttons")
+	check(blob:find("debuff types on you"), "cures slash: ...and the debuff types the game reported")
+	say(function() SlashCmdList.SHAMANKITCURE("test all") end)
+	check(S.testKey == "all", "cures slash: /cw still works as an alias")
+	say(function() SlashCmdList.SHAMANKITCURE("clear") end); ns.cureTest("clear")
+	say(function() SlashCmdList.SHAMANKIT("cures off") end)
+	check(db.cureOn == false, "cures slash: /shamankit cures off")
+	say(function() SlashCmdList.SHAMANKIT("cures on") end)
+	check(db.cureOn == true, "cures slash: ... on")
+	out = say(function() SlashCmdList.SHAMANKIT("cures nonsense") end)
+	check(out[#out] and out[#out]:find("/shamankit cures"), "cures slash: help for something it doesn't know")
+	check(SLASH_SHAMANKITCURE1 == "/curewatch" and SLASH_SHAMANKITCURE2 == "/cw", "cures: the old addon's commands answer")
+
+	-- the home page
+	local homeBtn
+	for _, f in ipairs(frames) do if f.kind == "Button" and f.text == "Cures" and f.parentFrame == savedCat.pages[1] then homeBtn = f end end
+	check(homeBtn ~= nil, "cures settings: a button for it on the home page")
+
+	-- damaged saved numbers never break the layout
+	db.cureSize, db.cureSpacing, db.cureWashAlpha, db.cureX = "big", {}, 0/0, "x"
+	ns.cureApply()
+	check(S.rowSlots.poison.w == 36, "cures: damaged saved numbers fall back to sensible ones")
+	db.cureSize, db.cureSpacing, db.cureWashAlpha, db.cureX = 36, 4, 30, 0
+	ns.cureApply()
+	noErrors("cures: nothing raised an error in the log")
+	reset(); CONTAINER_FAILS = true
+end
+
+
 do
 	local db = ShamanKitDB
 	local function W() return _G.ShamanKitWeapon end
@@ -1154,7 +1591,9 @@ do
 	local want = { UNIT_AURA = true, UNIT_INVENTORY_CHANGED = true, PLAYER_EQUIPMENT_CHANGED = true }
 	local known = { ADDON_LOADED = true, PLAYER_ENTERING_WORLD = true, PLAYER_TOTEM_UPDATE = true, UNIT_SPELLCAST_SUCCEEDED = true,
 		PLAYER_REGEN_DISABLED = true, PLAYER_REGEN_ENABLED = true, ADDON_ACTION_BLOCKED = true, ADDON_ACTION_FORBIDDEN = true,
-		UNIT_AURA = true, UNIT_INVENTORY_CHANGED = true, PLAYER_EQUIPMENT_CHANGED = true }
+		UNIT_AURA = true, UNIT_INVENTORY_CHANGED = true, PLAYER_EQUIPMENT_CHANGED = true,
+		-- the cures: all of these appear in addons installed for this client (RareScanner, CampingKit, ForeverFishing, WhatsTraining)
+		SPELLS_CHANGED = true, PLAYER_LEVEL_UP = true, ACTIONBAR_SLOT_CHANGED = true, ACTIONBAR_PAGE_CHANGED = true, SPELL_UPDATE_COOLDOWN = true }
 	local seen, unknown = {}, nil
 	for _, n in ipairs(REGISTERED) do seen[n] = true; if not known[n] then unknown = n end end
 	check(seen.UNIT_AURA and seen.UNIT_INVENTORY_CHANGED and seen.PLAYER_EQUIPMENT_CHANGED, "icons: the three events are registered")
@@ -1900,7 +2339,7 @@ do
 		Settings.RegisterCanvasLayoutSubcategory = nil
 		ns.buildOptions()
 		Settings.RegisterCanvasLayoutSubcategory = sub
-		check(#allCats == before + 4, "no sub-page support: the pages become categories of their own")
+		check(#allCats == before + 5, "no sub-page support: the pages become categories of their own")
 	end
 
 	-- /shamankit status prints both readings
