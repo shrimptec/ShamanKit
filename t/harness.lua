@@ -147,6 +147,7 @@ C_UnitAuras = {
 		return list
 	end,
 	GetAuraApplicationDisplayCount = function(_, id, minCount, maxCount)
+		if COUNT_FAILS then error("blocked") end
 		local d = IDAURAS[id]
 		if not d then error("invalid aura instance") end
 		CALLED_COUNT = { id = id, min = minCount, max = maxCount }
@@ -1208,10 +1209,11 @@ do
 		check(S().count.color[1] == 1, "...white, no warning colour")
 		check(not tostring(S().tipLine):find("can't be read"), "no 'can't be read' text anywhere")
 		local seen
-		for _, l in ipairs(ShamanKitDB.log) do if l:find("SHIELD auras hidden") then seen = l end end
-		check(seen ~= nil and seen:find("id=353") and seen:find("up"), "the log says what the game let us read (once per fight)")
-		local n = 0; for _, l in ipairs(ShamanKitDB.log) do if l:find("SHIELD auras hidden") then n = n + 1 end end
-		check(n == 1, "...once per fight, not once per message")
+		for _, l in ipairs(ShamanKitDB.log) do if l:find("SHIELD in a fight") then seen = l end end
+		check(seen ~= nil and seen:find("id=353") and seen:find("up") and seen:find("found") and seen:find("count"), "the log says what each call answered")
+		local function lines() local n = 0; for _, l in ipairs(ShamanKitDB.log) do if l:find("SHIELD in a fight") then n = n + 1 end end return n end
+		local before = lines(); for _ = 1, 6 do second(); fire("UNIT_AURA", "player") end
+		check(lines() == before, "...a line only when the answer changes, not once per message")
 		IDAURAS[353] = nil
 		fire("UNIT_AURA", "player")
 		check(not S().shown, "REPORTED BUG: the shield ends in the fight: the icon is gone at once, not at the end of the fight")
@@ -1229,10 +1231,18 @@ do
 		live2.applications = 0; second(); check(S().shown and S().count.text == "", "the game says no count: the number is empty, the icon stays while the aura is on")
 		live2.applications = 2; second()
 		-- the buff list can't be read: the icon stays, the last number, a little grey
-		IDLIST_FAILS = true; second()
-		check(S().shown and S().count.text == "2" and S().count.color[1] < 0.9, "buff list refused: icon and last number stay, a little grey")
-		IDLIST_FAILS = false; second()
-		check(S().shown and S().count.text == "2" and S().count.color[1] == 1, "...and white again as soon as it answers")
+		-- the real log: the id list is blocked. The count text alone must still carry the icon
+		IDLIST_FAILS = true; live2.applications = 2; second()
+		check(S().shown and S().count.text == "2" and S().count.color[1] == 1, "id list blocked: the count text alone still shows the live number (2), white")
+		live2.applications = 1; second(); check(S().count.text == "1", "...and follows it (1)")
+		local sawErr; for _, l in ipairs(ShamanKitDB.log) do if l:find("ids: error") then sawErr = true end end
+		check(sawErr, "the log says why the list failed")
+		-- both blocked: icon and last number stay, a little grey (nothing else can be read)
+		COUNT_FAILS = true; second()
+		check(S().shown and S().count.text == "1" and S().count.color[1] < 0.9, "both calls blocked: icon and last number stay, a little grey")
+		COUNT_FAILS = false; IDLIST_FAILS = false; second()
+		check(S().shown and S().count.text == "1" and S().count.color[1] == 1, "...and white again as soon as they answer")
+		live2.applications = 2; second()
 		-- a shield cast in the fight has an id nobody knows: nothing invented, the old one stays gone
 		-- fight over: the real reading again, new id remembered
 		AURAS_HIDDEN = false; inCombat = false

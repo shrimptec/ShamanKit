@@ -1025,21 +1025,38 @@ local function shieldCharges(data)
 	return n
 end
 
--- in a fight: "gone", "keep", or "up" + the charges text
+-- in a fight: "gone", "keep", or "up" + the charges text, and a short note of what each call answered (for the log).
+-- Two questions, two calls, and either may be blocked: the buff id list (is the remembered id still on me) and the
+-- game's count text for that id (it errors for an id that is not valid any more, so a success also means "still there").
+local function short(m) m = tostring(m):gsub("%s+", " "); return m:sub(1, 70) end
 local function hiddenShield()
 	local A = C_UnitAuras
-	if not S.id or not (A.GetUnitAuraInstanceIDs and A.GetAuraApplicationDisplayCount) then return "keep" end
+	if not S.id then return "keep", nil, "no id remembered" end
+	if not (A.GetUnitAuraInstanceIDs and A.GetAuraApplicationDisplayCount) then return "keep", nil, "calls missing" end
+	local note = {}
+	-- 1. the list of buff ids
+	local listed            -- true / false / nil (can't tell)
 	local ok, ids = pcall(A.GetUnitAuraInstanceIDs, "player", "HELPFUL")
-	if not ok or type(ids) ~= "table" or isSecret(ids) then return "keep" end
-	local found = false
-	for _, id in ipairs(ids) do
-		if isSecret(id) then return "keep" end
-		if id == S.id then found = true break end
+	if not ok then note[#note + 1] = "ids: error " .. short(ids)
+	elseif isSecret(ids) then note[#note + 1] = "ids: hidden"
+	elseif type(ids) ~= "table" then note[#note + 1] = "ids: " .. type(ids)
+	else
+		listed = false
+		for _, id in ipairs(ids) do
+			if isSecret(id) then listed = nil; note[#note + 1] = "ids: entries hidden"; break end
+			if id == S.id then listed = true break end
+		end
+		if listed ~= nil then note[#note + 1] = "ids: " .. #ids .. " buffs, " .. (listed and "found" or "not found") end
 	end
-	if not found then return "gone" end
+	-- 2. the count text
 	local ok2, text = pcall(A.GetAuraApplicationDisplayCount, "player", S.id, 1, 99)
-	if not ok2 then text = nil end
-	return "up", text
+	if ok2 then note[#note + 1] = "count: " .. (isSecret(text) and "hidden string" or ("'" .. tostring(text) .. "'"))
+	else note[#note + 1] = "count: error " .. short(text) end
+	S.countOK = ok2
+	local why = table.concat(note, "; ")
+	if listed == false then return "gone", nil, why end
+	if ok2 then return "up", text, why end
+	return "keep", nil, why
 end
 
 local function readShield()
@@ -1056,11 +1073,11 @@ local function readShield()
 		S.id, S.spell = nil, nil
 		return false
 	end
-	local how, text = hiddenShield()
-	if not S.loggedHidden then   -- once per fight: what the game let us read (so the next report has the facts)
-		S.loggedHidden = true
-		dbg("SHIELD auras hidden (combat=%s): id=%s -> %s, count text is %s", tostring(InCombatLockdown()), tostring(S.id), how,
-			text == nil and "nothing" or (isSecret(text) and "hidden (shown as is)" or ("'" .. tostring(text) .. "'")))
+	local how, text, why = hiddenShield()
+	if why ~= S.lastWhy or how ~= S.lastHow then   -- the log gets a line whenever the answer changes (a few per fight): the facts for the next report
+		S.lastWhy, S.lastHow = why, how
+		S.loggedN = (S.loggedN or 0) + 1
+		if S.loggedN <= 8 then dbg("SHIELD in a fight (id=%s): %s | %s", tostring(S.id), how, why or "") end
 	end
 	if how == "gone" then S.id, S.spell = nil, nil; return false end
 	if how == "up" then return true, text end
@@ -1598,7 +1615,7 @@ ev:SetScript("OnEvent", guard("event", function(self, event, arg1, ...)
 		dbg("%s: %s | aura readable=%s", event == "PLAYER_REGEN_DISABLED" and "COMBAT START" or "COMBAT END",
 			describe(playerPos()), tostring(aura ~= nil))
 		for slot in pairs(state) do state[slot].last = nil end
-		S.loggedHidden = false
+		S.loggedHidden, S.lastWhy, S.lastHow, S.loggedN = false, nil, nil, 0
 		ns.updateAux()                          -- the buff icons notice the fight edge at once (a fight hides auras, the end shows them again)
 		if event == "PLAYER_REGEN_ENABLED" then
 			if attachPending then applyAttach() end
