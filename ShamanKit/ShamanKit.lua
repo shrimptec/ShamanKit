@@ -425,12 +425,46 @@ local BUFF_GRACE = 3        -- a totem's buff takes a moment to arrive: no buff 
 
 local function edgeBand(range) return math.min(EDGE_BAND, range * 0.3) end
 
--- what the estimate says: true / false when it is clear, nil inside the band around the edge
-local function fromDistance(dist, range)
+-- what the estimate says: true / false when it is clear, nil inside the band around the edge.
+-- lo / hi are what THIS totem's buff taught us out of a fight (see learnEdge): the buff was on at distance lo, and
+-- off at distance hi, so its true edge (in the position's own numbers) lies between them. They narrow the band.
+local function fromDistance(dist, range, lo, hi)
 	local band = edgeBand(range)
+	if lo and hi and lo < hi then
+		if dist <= lo then return true end
+		if dist >= hi then return false end
+		if hi - lo <= 1.5 then return dist <= (lo + hi) / 2 end
+		return nil
+	end
+	if lo and dist <= lo then return true end
+	if hi and dist >= hi then return false end
 	if dist <= range - band then return true end
 	if dist >= range + band then return false end
 	return nil
+end
+
+-- A buff read out of a fight is exact: remember where, for this totem, it was on and where it was off. Only a buff that
+-- has had time to settle counts (just dropped, or just walked back in: it is not on yet), a buff still lingering a
+-- little after you left is kept from stretching the edge by more than 2 yards, and nothing that disagrees is kept.
+local SETTLE = 4
+local function learnEdge(s, dist, buff)
+	if not dist or not s.range or not s.t then return end
+	local t = GetTime()
+	if t - s.t < SETTLE then return end
+	if buff == false then
+		s.offSince = s.offSince or t
+		if t - s.offSince >= SETTLE and (not s.hi or dist < s.hi) then s.hi = dist end
+	else
+		s.offSince = nil
+		if dist <= s.range + 2 and (not s.lo or dist > s.lo) then s.lo = dist end
+	end
+	if s.lo and s.hi and s.lo >= s.hi then s.lo, s.hi = nil, nil end   -- readings that disagree: start again
+	local key = tostring(s.lo and math.floor(s.lo)) .. "/" .. tostring(s.hi and math.floor(s.hi))
+	if key ~= s.edgeKey then
+		s.edgeKey = key
+		dbg("EDGE learned for %s: buff on out to %s yd, off from %s yd (radius %s)", tostring(s.name),
+			s.lo and ("%.1f"):format(s.lo) or "?", s.hi and ("%.1f"):format(s.hi) or "?", tostring(s.range))
+	end
 end
 
 -- the buff's answer for this totem: true / false, or nil (no buff to look for, or the game hides auras)
@@ -453,7 +487,7 @@ local function rangeOf(slot, now)
 	local r, how, dist, byPos
 	local smart = db.rangeByBuff ~= false            -- the setting; also what a damaged value means
 	local function judge(d)                          -- smart: only a clear answer; off: the plain radius
-		if smart then return fromDistance(d, s.range) end
+		if smart then return fromDistance(d, s.range, s.lo, s.hi) end
 		return d <= s.range
 	end
 	if was and was.ux and now.ux and now.umap == was.umap then
@@ -477,6 +511,7 @@ local function rangeOf(slot, now)
 	end
 	if buff ~= nil then
 		r, how = buff, "buff"
+		if smart then learnEdge(s, dist, buff) end
 		if dist then                                      -- keep the number and the answer consistent
 			if r and dist >= s.range then dist = s.range * 0.97
 			elseif not r and dist < s.range then dist = s.range * 1.03 end
@@ -884,6 +919,7 @@ local function refreshSlot(slot, placed)
 		s.at = playerPos()
 		s.t = GetTime()
 		s.sure = nil                       -- a new totem: what was last known belonged to the old one
+		s.lo, s.hi, s.offSince = nil, nil, nil   -- and so was where its edge lay
 		s.last = nil
 		s.buffAt, s.buffVal = nil, nil     -- a new totem: the last buff reading belonged to the old one
 		local real = not isSecret(name) and type(name) == "string" and name ~= ""

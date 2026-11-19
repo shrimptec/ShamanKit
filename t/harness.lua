@@ -3487,6 +3487,79 @@ do
 	pos = { y = 0, x = 20, map = 1 }; tick()
 	check(plain(btn(1)) and waiting(btn(1)), "edge: at the edge: plain with the '?', the old red is not held (the position is readable)")
 
+	-- learning where THIS totem's edge is: the buff read out of a fight narrows the "?" band for the next fight
+	clear(); BUFF_READS = true; pos = { y = 0, x = 0, map = 1 }; mapOn = true; t = t + 10
+	totems[2] = { name = "Strength of Earth Totem IV", start = t, dur = 120, icon = 8 }
+	fire("PLAYER_TOTEM_UPDATE", 2)
+	local function hold(x, buff, secs)
+		pos = { y = 0, x = x, map = 1 }
+		auras["Strength of Earth"] = buff and { spellId = 8076 } or nil
+		for _ = 1, 3 do t = t + (secs or 2); tick() end
+	end
+	local function fightAt(x) AURAS_HIDDEN = true; inCombat = true; pos = { y = 0, x = x, map = 1 }; t = t + 1; tick() end
+	local function fightOver() AURAS_HIDDEN = false; inCombat = false end
+	fightAt(27); check(plain(btn(2)) and waiting(btn(2)), "learn: before anything is learned 27 of 30 is a '?'"); fightOver()
+	hold(31, true)
+	hold(32, false)
+	check(ns.barState(2).lo == 31 and ns.barState(2).hi == 32, "learn: on at 31, off at 32 (" .. tostring(ns.barState(2).lo) .. "," .. tostring(ns.barState(2).hi) .. ")")
+	fightAt(29); check(plain(btn(2)) and not waiting(btn(2)), "learn: 29: in, clearly"); 
+	fightAt(31.2); check(plain(btn(2)) and not waiting(btn(2)), "learn: 31.2 (edge is about 31.5): in, no ?")
+	fightAt(31.8); check(red(btn(2)) and not waiting(btn(2)), "learn: 31.8: out, no ?")
+	fightAt(36); check(red(btn(2)), "learn: 36: out")
+	fightOver()
+	-- a buff that only just arrived, or only just left, teaches nothing
+	clear(); BUFF_READS = true; pos = { y = 0, x = 0, map = 1 }; t = t + 10
+	totems[2] = { name = "Strength of Earth Totem IV", start = t, dur = 120, icon = 8 }
+	fire("PLAYER_TOTEM_UPDATE", 2)
+	hold(28, false, 0.4)
+	check(ns.barState(2).hi == nil, "learn: no buff in the first seconds proves nothing")
+	hold(40, true, 3)
+	check(ns.barState(2).lo == nil, "learn: a buff far past the edge (lingering) is not taken as the edge")
+	hold(20, true, 3); hold(26, false, 0.5)
+	check(ns.barState(2).hi == nil, "learn: just walked back in: a missing buff must last a few seconds first")
+	hold(26, false, 3)
+	check(ns.barState(2).hi == 26, "learn: ...then it counts")
+	hold(29, true, 3)
+	check(ns.barState(2).hi == nil and ns.barState(2).lo == 29, "learn: readings that disagree are thrown away, the newest starts again (" .. tostring(ns.barState(2).lo) .. "," .. tostring(ns.barState(2).hi) .. ")")
+	-- only the nearest "off" and the farthest "on" count; a short miss after a long hit changes nothing
+	clear(); BUFF_READS = true; pos = { y = 0, x = 0, map = 1 }; t = t + 10
+	totems[2] = { name = "Strength of Earth Totem IV", start = t, dur = 120, icon = 8 }
+	fire("PLAYER_TOTEM_UPDATE", 2)
+	hold(31, true, 0.4)
+	check(ns.barState(2).lo == nil, "learn: a buff on in the first seconds is not taken yet")
+	t = t + 5; hold(35, false, 3)
+	check(ns.barState(2).hi == 35, "learn: off at 35")
+	hold(30, false, 3)
+	check(ns.barState(2).hi == 30, "learn: off at 30 too: the edge is nearer")
+	hold(24, true, 3); hold(29, false, 0.5)
+	check(ns.barState(2).hi == 30 and ns.barState(2).lo == 24, "learn: a miss that has only just begun changes nothing (" .. tostring(ns.barState(2).hi) .. ")")
+	hold(27, true, 3)
+	check(ns.barState(2).lo == 27, "learn: on at 27 as well: the edge is farther")
+	hold(25, true, 3)
+	check(ns.barState(2).lo == 27, "learn: a nearer 'on' does not shrink it")
+	-- one side known
+	local st2 = ns.barState(2)
+	st2.lo, st2.hi = 31, nil; fightAt(30); check(plain(btn(2)) and not waiting(btn(2)), "learn: on at 31 only: 30 is in")
+	fightAt(33); check(waiting(btn(2)), "learn: ...and 33 is still unsure")
+	st2.lo, st2.hi = nil, 28; fightAt(29); check(red(btn(2)) and not waiting(btn(2)), "learn: off at 28 only: 29 is out")
+	fightAt(27); check(waiting(btn(2)), "learn: ...and 27 is unsure")
+	-- a wide gap stays unsure
+	st2.lo, st2.hi = 26, 34; fightAt(30); check(waiting(btn(2)), "learn: on at 26, off at 34: 30 is unsure")
+	fightAt(25); check(plain(btn(2)) and not waiting(btn(2)), "learn: ...25 is in")
+	fightAt(35); check(red(btn(2)) and not waiting(btn(2)), "learn: ...35 is out")
+	st2.lo, st2.hi = 31, 32; fightAt(30.5); check(plain(btn(2)) and not waiting(btn(2)), "learn: narrow gap: below the middle is in")
+	fightAt(31.9); check(red(btn(2)) and not waiting(btn(2)), "learn: narrow gap: above the middle is out")
+	fightOver(); auras["Strength of Earth"] = nil
+	-- a new totem forgets it
+	hold(31, true); hold(32, false)
+	totems[2] = { name = "Strength of Earth Totem IV", start = t, dur = 120, icon = 8 }
+	fire("PLAYER_TOTEM_UPDATE", 2)
+	check(ns.barState(2).lo == nil and ns.barState(2).hi == nil, "learn: a new totem starts again")
+	-- the setting off: the learned edge is not used
+	hold(31, true); hold(32, false); db.rangeByBuff = false
+	fightAt(27); check(plain(btn(2)), "learn: with 'watch the buff' off the plain radius is used")
+	db.rangeByBuff = true; fightOver(); auras["Strength of Earth"] = nil
+
 	clear()
 	BUFF_READS = false
 	pos = realPos; mapOn = realMapOn
