@@ -60,8 +60,42 @@ local function mock(kind)
 end
 
 local frames = {}
+CONTAINER_FAILS = true    -- a client that has no aura container (the older tests exercise the reading by name that is used then)
+LOADED_ADDONS = {}
+C_AddOns = { IsAddOnLoaded = function(n) return LOADED_ADDONS[n] end, LoadAddOn = function(n) LOADED_ADDONS[n] = true end }
+local function auraButton()
+	local b = mock("auraButton")
+	rawset(b, "SetIcon", function(self, tex) self.iconTex = tex end)
+	rawset(b, "SetApplicationCount", function(self, fs, opts)
+		if opts and opts.formatter and BAD_FORMATTER then error("bad options") end
+		self.countFS, self.countOpts = fs, opts
+	end)
+	return b
+end
 function CreateFrame(kind, name, parent, tmpl)
+	if kind == "AuraContainer" and CONTAINER_FAILS then error("Unknown frame type: AuraContainer") end
 	local f = mock(kind); f.name = name; f.tmpl = tmpl; f.parentFrame = parent
+	if kind == "AuraContainer" then
+		rawset(f, "SetUnit", function(self, u) self.unit = u end)
+		if not NO_SLOTS then   -- an older client has no such method at all
+			rawset(f, "AddAuraSlot", function(self, key, filter, opts)
+				self.slots = self.slots or {}
+				local b = auraButton(); self.slots[key] = { filter = filter, opts = opts, button = b }
+				opts.initializeFrame(b)
+				b.sizeAtInit = b.w      -- the real game gives these buttons no size of their own
+				return b
+			end)
+		else
+			rawset(f, "AddAuraSlot", false)
+		end
+		rawset(f, "AddAuraGroup", function(self, key, filter, opts)
+			self.groups = self.groups or {}
+			self.groups[key] = { filter = filter, opts = opts }
+		end)
+		rawset(f, "Show", function(self) self.shown = true end)
+		rawset(f, "Hide", function(self) self.shown = false end)
+		rawset(f, "SetEnabled", function(self, v) self.enabled = v end)
+	end
 	if tmpl and tmpl:find("Secure") then rawset(f, "protected", true) end
 	if name then _G[name] = f end
 	frames[#frames + 1] = f
@@ -119,6 +153,7 @@ function GetTotemInfo(slot)
 	return true, d.name, d.start, d.dur, d.icon
 end
 local auras = {}
+C_StringUtil = { CreateNumericRuleFormatter = function() return { FormatNumber = function(_, n) return tostring(n) end } end }
 AURAS_HIDDEN = false   -- a fight: the game hides auras
 IDAURAS = {}           -- what a lookup by spell id still answers while they are hidden
 C_Secrets = { ShouldAurasBeSecret = function() return AURAS_HIDDEN end }
@@ -1284,6 +1319,102 @@ do
 		AURAS_HIDDEN = false; inCombat = false; fire("PLAYER_REGEN_ENABLED")
 		auras["Lightning Shield"] = nil; IDAURAS = {}; fire("UNIT_AURA", "player")
 		noErrors("fight test: no error in the log")
+	end
+
+	-- ---- the shield icon drawn by the GAME (aura container): the only thing that works in a fight
+	do
+		CONTAINER_FAILS = false; NO_SLOTS = false; BAD_FORMATTER = false; AURAS_HIDDEN = false; inCombat = false
+		secretPos = false; IDAURAS = {}; EXTRA_IDS = {}; auras["Lightning Shield"] = nil
+		db.shieldOn = true; db.weaponOn = false; ns.optionsOpen = false; ShamanKitDB.log = {}
+		ns._resetBox(); ns.updatePreview(); second()
+		local c
+		for _, f in ipairs(frames) do if f.kind == "AuraContainer" and f.slots and f.slots.ShamanKitShield then c = f end end
+		check(c ~= nil, "container: an aura container is made for the shield (out of combat)")
+		local slot = c and c.slots.ShamanKitShield
+		check(c.unit == "player", "container: it watches the player")
+		check(slot.filter == "HELPFUL", "container: buffs only")
+		local ids = slot.opts.candidateFilters.includeSpellIDs
+		check(ids[324] and ids[945] and ids[10432] and not ids[1126], "container: limited to Lightning Shield by spell id (every rank), nothing else")
+		check(LOADED_ADDONS.Blizzard_AuraContainer, "container: the game's aura container addon is loaded first")
+		local b = slot.button
+		check(b.iconTex ~= nil, "container: the game is told where to put the aura's picture")
+		check(b.countFS ~= nil and b.countFS.kind == "region", "container: the game is told where to write the stack count")
+		check(b.countOpts and b.countOpts.formatter ~= nil, "container: a number formatter is given, so 1 charge shows '1'")
+		check(b.sizeAtInit and b.sizeAtInit > 0, "container: the button is given a size when it is made (without one it is invisible)")
+		local f = S()
+		check(b.anchor and b.anchor[1] == "TOPLEFT" and b.anchor[2] == f, "container: the icon sits exactly where the sample icon sits")
+		check(c.shown == true and c.enabled == true, "container: shown and enabled when the shield icon is on")
+		check(not S().shown, "container: our own frame is not drawn (no second icon on top of the game's)")
+		auras["Lightning Shield"] = { applications = 3, auraInstanceID = 31, spellId = 945 }; fire("UNIT_AURA", "player"); second()
+		check(not S().shown, "container: the shield is really up and readable, still only the game's icon (no double)")
+		auras["Lightning Shield"] = nil; fire("UNIT_AURA", "player"); second()
+		local made; for _, l in ipairs(ShamanKitDB.log) do if l:find("SHIELD container made") then made = l end end
+		check(made and made:find("slot") and made:find("CreateNumericRuleFormatter"), "container: the log says what was made")
+		check(ns.boxInfo():find("game%-drawn"), "container: status says so")
+
+		-- a fight: nothing of ours may be touched, and nothing is read
+		local nCont = 0; for _, fr in ipairs(frames) do if fr.kind == "AuraContainer" then nCont = nCont + 1 end end
+		AURAS_HIDDEN = true; inCombat = true; fire("PLAYER_REGEN_DISABLED")
+		for _ = 1, 4 do second(); fire("UNIT_AURA", "player") end
+		local nCont2 = 0; for _, fr in ipairs(frames) do if fr.kind == "AuraContainer" then nCont2 = nCont2 + 1 end end
+		check(nCont2 == nCont, "fight: no new container is made in combat")
+		check(c.shown == true and not S().shown, "fight: the game's icon stays up, ours stays hidden")
+		local wBefore = b.w
+		db.size = 80; ns.updatePreview(); second()
+		check(b.w == wBefore, "fight: the icon is not resized in combat")
+		AURAS_HIDDEN = false; inCombat = false; fire("PLAYER_REGEN_ENABLED"); second()
+		check(b.w ~= wBefore, "fight over: the size change is applied")
+		db.size = 36; ns.updatePreview()
+
+		-- settings open: a sample shows, the game's icon steps aside
+		ns.optionsOpen = true; ns.updatePreview()
+		check(S().shown and S().count.text == "3" and c.shown == false, "settings open: the sample shows (3) and the game's icon is hidden, so there is no double icon")
+		ns.optionsOpen = false; ns.updatePreview()
+		check(not S().shown and c.shown == true, "settings closed: the sample is gone, the game's icon is back")
+		-- switched off
+		db.shieldOn = false; ns.updatePreview(); second()
+		check(c.shown == false and c.enabled == false and not S().shown, "shield icon off: nothing shows")
+		db.shieldOn = true; ns.updatePreview(); second()
+		check(c.shown == true, "shield icon on again: shows")
+		noErrors("container: no error in the log")
+
+		-- the client has no AuraSlot: a group of one
+		NO_SLOTS = true; ns._resetBox(); ns.updatePreview(); second()
+		local g; for _, fr in ipairs(frames) do if fr.groups and fr.groups.ShamanKitShield then g = fr end end
+		check(g ~= nil and g.groups.ShamanKitShield.opts.maxFrameCount == 1, "no slots on this client: a group that holds one aura")
+		check(g.groups.ShamanKitShield.opts.candidateFilters.includeSpellIDs[945], "...limited to the shield the same way")
+		NO_SLOTS = false
+
+		-- a formatter the game rejects: the plain count is used
+		BAD_FORMATTER = true; ns._resetBox(); ns.updatePreview(); second()
+		local c2; for _, fr in ipairs(frames) do if fr.slots and fr.slots.ShamanKitShield then c2 = fr end end
+		check(c2.slots.ShamanKitShield.button.countFS ~= nil, "a formatter the game rejects: the stack count still gets registered without it")
+		BAD_FORMATTER = false
+
+		-- no formatter object on this client: still works, and the log says 1 charge shows blank
+		local su = C_StringUtil; C_StringUtil = nil; ShamanKitDB.log = {}; ns._resetBox(); ns.updatePreview(); second()
+		local noFmt; for _, l in ipairs(ShamanKitDB.log) do if l:find("none %(1 charge shows blank%)") then noFmt = true end end
+		check(noFmt, "no number formatter on this client: still made, and the log says 1 charge shows blank")
+		C_StringUtil = su
+
+		-- the client can't make one: the older reading is used, nothing breaks
+		CONTAINER_FAILS = true; ShamanKitDB.log = {}; ns._resetBox(); ns.updatePreview(); second()
+		check(ns.boxInfo():find("not available"), "container refused: status says it reads by name instead")
+		auras["Lightning Shield"] = { applications = 2, auraInstanceID = 9, spellId = 945 }; fire("UNIT_AURA", "player")
+		check(S().shown and S().count.text == "2", "container refused: the shield icon still works the old way out of combat")
+		auras["Lightning Shield"] = nil; fire("UNIT_AURA", "player")
+		local refused; for _, l in ipairs(ShamanKitDB.log) do if l:find("container could not be made") then refused = true end end
+		check(refused, "container refused: the log says why")
+		-- it is not retried every second
+		local before = #ShamanKitDB.log; for _ = 1, 5 do second() end
+		check(#ShamanKitDB.log == before, "container refused: not retried over and over")
+		-- started in a fight: wait for the fight to end, then make it
+		CONTAINER_FAILS = false; ns._resetBox(); inCombat = true; AURAS_HIDDEN = true; ns.updateAux(); second()
+		check(ns.boxInfo():find("not made yet"), "the game started in a fight: no container is made in combat")
+		inCombat = false; AURAS_HIDDEN = false; second()
+		check(ns.boxInfo():find("game%-drawn"), "made after the fight when the game started in one")
+		CONTAINER_FAILS = true; ns._resetBox()
+		db.weaponOn = true
 	end
 
 	-- the switches

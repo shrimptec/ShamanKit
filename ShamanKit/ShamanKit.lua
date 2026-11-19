@@ -1226,6 +1226,7 @@ applyAux = function()
 			f:SetPoint("TOPLEFT", aux, "TOPLEFT", 0, 0)
 		end
 	end
+	if ns.syncShieldBox then ns.syncShieldBox() end   -- the game-drawn shield icon follows (out of combat)
 	local long = math.max(place, 1) * s + math.max(place - 1, 0) * gap
 	if row then aux:SetSize(long, s) else aux:SetSize(s, long) end
 	aux:ClearAllPoints()
@@ -1323,10 +1324,10 @@ local function paintWeapon()
 	f:Show()
 end
 
-local function paintShield()
+local function paintShieldIcon(boxMode)
 	local f = ind.shield
 	if not f then return end
-	if db.shieldOn then
+	if db.shieldOn and not boxMode then
 		local r, n = readShield()
 		if r ~= "keep" then
 			if (r and true or false) ~= S.up then dbg("SHIELD %s charges=%s combat=%s", r and "up" or "down", isSecret(n) and "?" or tostring(n), tostring(InCombatLockdown())) end
@@ -1335,7 +1336,7 @@ local function paintShield()
 			S.stale = S.up and true or false   -- can't read it right now: the icon and the last number stay, a little grey
 		end
 	end
-	local real = db.shieldOn and S.up
+	local real = db.shieldOn and not boxMode and S.up
 	local view = real and "up" or ((db.shieldOn and showSamples()) and "sample" or "off")
 	local stale = view == "up" and S.stale
 	local n = view == "sample" and 3 or S.n
@@ -1357,6 +1358,137 @@ local function paintShield()
 		or (isText and n ~= "" and (n .. " charges")) or nil
 	f.tipLine = number and (stale and (number .. " (last seen before the fight)") or (number .. " left")) or nil
 	f:Show()
+end
+
+-- ---- the shield icon drawn by the GAME (the only way to follow a buff in a fight)
+-- The log proved every aura call refuses addons in combat. What the game offers is an AuraContainer widget: the game itself
+-- fills it with the buff's icon and writes the stack count into a text we hand it, in combat too, and the addon never reads
+-- the aura. It is limited to Lightning Shield by spell id (documented: candidateFilters.includeSpellIDs; works on the
+-- player). The addon only places it and shows / hides it, out of combat. If the client can't make one, the older reading
+-- (by name, out of combat) stays in use.
+local SHIELD_IDS = {}
+for _, id in ipairs({ 324, 325, 905, 945, 8134, 10431, 10432, 25469, 25472, 49280, 49281, SHIELD_ID }) do SHIELD_IDS[id] = true end
+local box = {}   -- container, button, how, parts, key
+
+-- a number formatter, so that 1 charge shows "1" (without one the game leaves the count blank below 2)
+local function countFormatter()
+	local su = C_StringUtil
+	if type(su) ~= "table" then return nil end
+	for _, name in ipairs({ "CreateNumericRuleFormatter", "CreateNumberFormatter" }) do
+		local make = su[name]
+		if type(make) == "function" then
+			local ok, f = pcall(make)
+			if ok and f then
+				local ok2, t = pcall(function() return f:FormatNumber(1) end)
+				if ok2 and (t == "1" or t == 1) then return f, name end
+			end
+		end
+	end
+end
+
+-- runs once per button, BEFORE the game restricts it: everything the icon is made of goes in here
+local function styleBoxButton(button)
+	local s = auxSize()
+	button:SetSize(s, s)
+	pcall(function() button:SetFrameStrata(ind.shield:GetFrameStrata()) end)
+	pcall(function() button:SetFrameLevel((ind.shield:GetFrameLevel() or 1) + 1) end)
+	pcall(button.EnableMouse, button, false)      -- the sample underneath stays the thing you grab
+	local icon = button:CreateTexture(nil, "BACKGROUND")
+	icon:SetAllPoints()
+	icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+	button:SetIcon(icon)                          -- the game puts the aura's own picture here
+	local over = CreateFrame("Frame", nil, button)
+	over:SetAllPoints()
+	over:SetFrameLevel((button:GetFrameLevel() or 1) + 2)
+	local border = over:CreateTexture(nil, "OVERLAY")
+	border:SetTexture("Interface\\Buttons\\UI-Quickslot2")
+	border:SetPoint("CENTER", 0, -1)
+	border:SetSize(s * 66 / 36, s * 66 / 36)
+	local count = over:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
+	count:SetPoint("BOTTOMRIGHT", -1, 2)
+	local ok = box.fmt and pcall(button.SetApplicationCount, button, count, { formatter = box.fmt })
+	if not ok then
+		box.fmt = nil
+		pcall(button.SetApplicationCount, button, count, {})   -- the game writes the stack count here
+	end
+	box.button, box.border = button, border
+end
+
+local function makeBox()
+	if box.container or box.failed then return end
+	if InCombatLockdown() or aurasHidden() or not (db.shieldOn and ind.shield and aux) then return end
+	local ok, err = pcall(function()
+		if C_AddOns and C_AddOns.IsAddOnLoaded and C_AddOns.LoadAddOn and not C_AddOns.IsAddOnLoaded("Blizzard_AuraContainer") then
+			C_AddOns.LoadAddOn("Blizzard_AuraContainer")
+		end
+		local c = CreateFrame("AuraContainer", nil, UIParent, "CustomAuraContainerTemplate")
+		c:SetUnit("player")
+		c:SetSize(1, 1)
+		box.fmt, box.fmtName = countFormatter()
+		local opts = {
+			candidateFilters = { includeSpellIDs = SHIELD_IDS },
+			initializeFrame = styleBoxButton,
+		}
+		local how
+		if c.AddAuraSlot then
+			box.button = c:AddAuraSlot("ShamanKitShield", "HELPFUL", opts) or box.button
+			how = "slot"
+		else
+			opts.maxFrameCount = 1
+			c:AddAuraGroup("ShamanKitShield", "HELPFUL", opts)
+			pcall(c.SetAuraGroupMaxFrameCount, c, "ShamanKitShield", 1)
+			pcall(c.SetFlowLayoutAnchorPoint, c, "TOPLEFT")
+			how = "group"
+		end
+		box.container, box.how = c, how
+	end)
+	if not ok then
+		box.failed = true
+		dbg("SHIELD container could not be made: %s", short and short(err) or tostring(err))
+		return
+	end
+	local names = {}
+	if type(C_StringUtil) == "table" then for k, v in pairs(C_StringUtil) do if type(v) == "function" then names[#names + 1] = k end end end
+	table.sort(names)
+	dbg("SHIELD container made (%s); count formatter: %s; C_StringUtil has: %s", box.how, box.fmtName or "none (1 charge shows blank)", table.concat(names, " "))
+end
+
+-- place it on the sample's spot, size it, show or hide it: out of combat only (never in a fight)
+function ns.syncShieldBox()
+	local c = box.container
+	if not c or not ind.shield then return end
+	if InCombatLockdown() or aurasHidden() then return end
+	local s = auxSize()
+	local want = (db.shieldOn and not showSamples()) and true or false
+	local key = s .. "|" .. tostring(want)
+	if key == box.key then return end
+	box.key = key
+	pcall(function()
+		c:ClearAllPoints()
+		c:SetPoint("TOPLEFT", ind.shield, "TOPLEFT", 0, 0)
+		local b = box.button
+		if b then
+			b:SetSize(s, s)
+			if box.how == "slot" then b:ClearAllPoints(); b:SetPoint("TOPLEFT", ind.shield, "TOPLEFT", 0, 0) end
+			if box.border then box.border:SetSize(s * 66 / 36, s * 66 / 36) end
+		end
+		c:SetEnabled(want)
+		if want then c:Show() else c:Hide() end
+	end)
+end
+
+function ns._resetBox() for k in pairs(box) do box[k] = nil end end   -- (for the tests: start from "not made yet")
+
+function ns.boxInfo()
+	if box.container then return ("game-drawn (%s, count formatter %s)"):format(box.how or "?", box.fmtName or "none") end
+	if box.failed then return "container not available: reading by name instead" end
+	return "not made yet"
+end
+
+local function paintShield()
+	if db.shieldOn and not box.container then makeBox() end
+	paintShieldIcon(box.container ~= nil)
+	ns.syncShieldBox()
 end
 
 ns.updateAux = guard("indicators", function() paintWeapon(); paintShield() end)
@@ -1672,6 +1804,7 @@ SlashCmdList.SHAMANKIT = function(msg)
 		local up, n = readShield()
 		print(("|cff33ff99ShamanKit|r %s: %s%s (%s)"):format(shieldAuraName(), tostring(up),
 			(up == true and not isSecret(n)) and (", charges " .. tostring(n)) or "", db.shieldOn and "icon on" or "icon off"))
+		print("|cff33ff99ShamanKit|r shield icon: " .. ns.boxInfo())
 	elseif ns.openOptions then
 		ns.openOptions(msg)   -- "bar", "totems" or "buffs" open that page
 	end
