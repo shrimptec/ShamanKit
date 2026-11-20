@@ -128,9 +128,12 @@ local function header(parent, text, x, y, width)
 	return fs
 end
 
-local function note(parent, text, x, y)
+-- Small grey text. It wraps instead of running off the window: a note in the left column stops before the right
+-- column (x 320), one in the right column at the window's edge; width overrides that (full-width text)
+local function note(parent, text, x, y, width)
 	local fs = parent:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
 	fs:SetPoint("TOPLEFT", x, y)
+	fs:SetWidth(width or (x < 316 and (306 - x) or (650 - x)))
 	fs:SetJustifyH("LEFT")
 	fs:SetText(text)
 	return fs
@@ -226,7 +229,7 @@ function ns.buildOptions()
 		av:Hide()
 		page.advButton = av
 		panel.advButton = av
-		note(panel, subtitle, 16, -42)
+		note(panel, subtitle, 16, -42, 620)
 		panel:SetScript("OnShow", function()
 			up[panel] = true
 			page.refresh()
@@ -264,7 +267,7 @@ function ns.buildOptions()
 		b:SetPoint("TOPLEFT", LEFT, y)
 		b:SetText(label)
 		b:SetScript("OnClick", function() ns.openOptions(which) end)
-		note(p0, text, LEFT + 156, y - 6)
+		note(p0, text, LEFT + 156, y - 6, 470)
 	end
 	pageButton("Totem bar", "bar", -116, "Your active totems, their time left, range, and where the bar sits.")
 	pageButton("Totems", "totems", -150, "The order of the totems, and a place kept open for each.")
@@ -273,7 +276,7 @@ function ns.buildOptions()
 	pageButton("Call spells", "calls", -252, "Buttons for Call of the ..., Totemic Call and Totemic Recall at the bar.")
 	pageButton("Maelstrom", "mw", -286, "A bar for your Maelstrom Weapon stacks, and a glow on Lightning Bolt at five.")
 	header(p0, "Commands", LEFT, -338, 580)
-	note(p0, "/shamankit - open this window\n/shamankit bar, totems, buffs, cures, calls or mw - open that page\n/shamankit mw ... (also /mw) - the Maelstrom bar: test, color, size, glow ... (/mw help)\n/shamankit cures test - light the cures for a few seconds (also /cw)\n/shamankit move - show every piece as a frame you can drag (also the Move on screen button on each page)\n/shamankit lock or unlock - lock the frames, or make them draggable\n/shamankit reset - put the bar, the buff icons and the cure row back in the usual place\n/shamankit status - print what the addon reads (for bug reports)", LEFT, -364)
+	note(p0, "/shamankit - open this window\n/shamankit bar, totems, buffs, cures, calls or mw - open that page\n/shamankit mw ... (also /mw) - the Maelstrom bar: test, color, size, glow ... (/mw help)\n/shamankit cures test - light the cures for a few seconds (also /cw)\n/shamankit move - show every piece as a frame you can drag (also the Move on screen button on each page)\n/shamankit lock or unlock - lock the frames, or make them draggable\n/shamankit reset - put the bar, the buff icons and the cure row back in the usual place\n/shamankit status - print what the addon reads (for bug reports)", LEFT, -364, 620)
 
 	-- ------------------------------------------------------------ page 1: the totem bar
 	local main = newPage("Totem bar", "Totem bar",

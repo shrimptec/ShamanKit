@@ -27,15 +27,15 @@ Small helpers for shamans, for World of Warcraft: Forever, in the default UI sty
   fight a click casts as normal, but choosing another Call spell waits until the fight is over.
 - **Maelstrom Weapon bar** (the MaelstromBar addon, folded in; off until you tick *Show the Maelstrom Weapon bar* on the
   Maelstrom page): five squares that fill with your stacks, a different colour at 5, and an optional stack count above,
-  in the middle of or below the bar (drag it in Move mode, or set an offset). Shown with at least 1 stack or in a fight, or
-  all the time (option). Size (width, height, spacing), scale, the four colours (stacks 1 to 4, 5 stacks, background, glow)
+  in the middle of or below the bar (drag it in Move mode, or set an offset). Shown with at least 1 stack or in a fight, only while you have stacks (option; in a fight the game's own squares
+  show alone, without the frame and background), or all the time (option). Size (width, height, spacing), scale, the four colours (stacks 1 to 4, 5 stacks, background, glow)
   are settings. In a fight the game itself draws the squares, the count and the glow (an aura container, the same route
   as the Lightning Shield icon), so nothing needs setting up; it is built out of combat, and a change made in a fight
   (colour, size, count) is applied when the fight ends. Out of combat the buff (spell id 408505, name as a fallback, or a
   buff name of your own) is read about 20 times a second. A pulsing **glow** on every action button holding Lightning
   Bolt (spells, macros with `#showtooltip` / `/cast` / `/use` / `/castsequence`, ElvUI / Bartender / Dominos buttons and
   other UIs, found by a scan) at 5 stacks; the spell and extra frames to glow are settings. `/shamankit mw` (also `/mw`,
-  `/maelstrombar`): `options`, `move` / `lock`, `always`, `color [full|bg|glow] r g b`, `count [pos above|center|below | offset x y]`,
+  `/maelstrombar`): `options`, `move` / `lock`, `always`, `only`, `color [full|bg|glow] r g b`, `count [pos above|center|below | offset x y]`,
   `size w h [gap]`, `scale 0.5-3`, `glow`, `glowspell name|id`, `glowframe FrameName|clear`, `glowscan`, `test 0-5`
   (fake stacks, 20 seconds), `aura BuffName`, `reset`, `setup`, `native [retry]`, `debug`, and `log` / `testerror` for an
   optional recorder of Lua errors from the whole game (tick box on the page, off by default). It stays off while the

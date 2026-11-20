@@ -10,7 +10,7 @@ function ns.buildMaelstromPage(ui)
 
 	local page = newPage("Maelstrom", "Maelstrom Weapon",
 		"A bar of five squares for your Maelstrom Weapon stacks, and a glow on Lightning Bolt at five.",
-		{ "mwOn", "mwAlways", "mwCount", "mwCountPos", "mwCountX", "mwCountY", "mwW", "mwH", "mwGap", "mwScale", "mwColor", "mwColorFull",
+		{ "mwOn", "mwAlways", "mwOnlyStacks", "mwCount", "mwCountPos", "mwCountX", "mwCountY", "mwW", "mwH", "mwGap", "mwScale", "mwColor", "mwColorFull",
 			"mwColorBg", "mwColorGlow", "mwGlow", "mwGlowSpell", "mwAura", "mwFrames", "mwErrorLog", "mwPoint", "mwRelPoint", "mwX", "mwY" })
 	local p = page.panel
 	page.onDefault = function() if ns.mwApply then ns.mwApply() end end
@@ -19,16 +19,17 @@ function ns.buildMaelstromPage(ui)
 	header(p, "Bar", LEFT, -78, COLW)
 	local on = page.add(checkbox(p, "Show the Maelstrom Weapon bar", "mwOn", LEFT, -102))
 	page.add(checkbox(p, "Always show it (not only with stacks)", "mwAlways", LEFT, -128))
-	local count = page.add(checkbox(p, "Show the stack count as a number", "mwCount", LEFT, -154))
+	page.add(checkbox(p, "Only show it while you have stacks", "mwOnlyStacks", LEFT, -154))
+	local count = page.add(checkbox(p, "Show the stack count as a number", "mwCount", LEFT, -180))
 	local countPos = radioGroup(p, {
 		{ "top", "Above" }, { "center", "Middle" }, { "bottom", "Below" },
-	}, LEFT + 28, -180, 3, 76, 24,
+	}, LEFT + 28, -206, 3, 76, 24,
 		function() local v = ns.get().mwCountPos; return (v == "center" or v == "bottom") and v or "top" end,
 		function(v) ns.get().mwCountPos = v end)
 	page.add(countPos)
 
 	-- ---- colours: a swatch opens the game's colour picker
-	header(p, "Colors", LEFT, -222, COLW)
+	header(p, "Colors", LEFT, -244, COLW)
 	local function swatchRow(label, key, y)
 		local btn = CreateFrame("Button", nil, p)
 		btn:SetSize(24, 24)
@@ -68,15 +69,15 @@ function ns.buildMaelstromPage(ui)
 		page.add(btn)
 		return btn
 	end
-	swatchRow("Stacks 1 to 4", "mwColor", -246)
-	swatchRow("5 stacks (maximum)", "mwColorFull", -274)
-	swatchRow("Bar background", "mwColorBg", -302)
-	swatchRow("Glow on the spell", "mwColorGlow", -330)
+	swatchRow("Stacks 1 to 4", "mwColor", -268)
+	swatchRow("5 stacks (maximum)", "mwColorFull", -294)
+	swatchRow("Bar background", "mwColorBg", -320)
+	swatchRow("Glow on the spell", "mwColorGlow", -346)
 
 	-- ---- the glow
-	header(p, "Action-bar glow", LEFT, -378, COLW)
-	page.add(checkbox(p, "Glow on the spell at 5 stacks", "mwGlow", LEFT, -402))
-	note(p, "Spell to highlight (name or ID); empty = Lightning Bolt", LEFT + 4, -432)
+	header(p, "Action-bar glow", LEFT, -390, COLW)
+	page.add(checkbox(p, "Glow on the spell at 5 stacks", "mwGlow", LEFT, -414))
+	note(p, "Spell (name or ID); empty = Lightning Bolt", LEFT + 4, -444)
 	local function editBox(x, y, key, apply)
 		local eb = CreateFrame("EditBox", nil, p, "InputBoxTemplate")
 		eb:SetSize(220, 22)
@@ -94,7 +95,7 @@ function ns.buildMaelstromPage(ui)
 		page.add(eb)
 		return eb
 	end
-	editBox(LEFT + 8, -450, "mwGlowSpell")
+	editBox(LEFT + 8, -460, "mwGlowSpell")
 
 	-- ---- right column: the fight display, size, test
 	header(p, "In a fight", RIGHT, -78, COLW)
@@ -141,10 +142,10 @@ function ns.buildMaelstromPage(ui)
 	local ox = page.adv(page.add(slider(p, "Count left / right", "mwCountX", -200, 200, RIGHT, -470)))
 	local oy = page.adv(page.add(slider(p, "Count up / down", "mwCountY", -100, 100, RIGHT, -514)))
 	page.adv(header(p, "Stack count position", RIGHT, -446, COLW))
-	page.adv(header(p, "Buff to track", LEFT, -486, COLW))
-	local aura = editBox(LEFT + 8, -508, "mwAura")
+	page.adv(header(p, "Buff to track", LEFT, -500, COLW))
+	local aura = editBox(LEFT + 8, -522, "mwAura")
 	page.adv(aura)
-	local errlog = page.add(checkbox(p, "Record Lua errors (/shamankit mw log)", "mwErrorLog", LEFT, -534,
+	local errlog = page.add(checkbox(p, "Record Lua errors (/shamankit mw log)", "mwErrorLog", LEFT, -548,
 		nil, function(v) ns.get().mwErrorLog = v; if ns.mwErrorLogChanged then ns.mwErrorLogChanged() end end))
 	page.adv(errlog)
 

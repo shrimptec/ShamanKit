@@ -21,14 +21,14 @@ function ns.buildCuresPage(ui)
 	header(p, "Where", LEFT, -196, COLW)
 	local bars = page.add(checkbox(p, "On my action bar buttons", "cureBars", LEFT, -222))
 	local row = page.add(checkbox(p, "In a small icon row", "cureRow", LEFT, -248))
-	local always = page.add(checkbox(p, "Keep the row on screen when nothing is on me", "cureAlways", LEFT, -274))
+	local always = page.add(checkbox(p, "Keep the row up when nothing is on me", "cureAlways", LEFT, -274))
 	local click = page.add(checkbox(p, "Click a lit icon to cure myself", "cureClick", LEFT, -300))
 	local clickNote = note(p, "Casts that cure on you, in a fight too.", LEFT + 28, -328)
 	note(p, "To place the row, press Move on screen (top right).", LEFT, -356)
 
 	-- advanced: dragging by hand, and what the addon found
 	page.adv(header(p, "Position of the row", LEFT, -396, COLW))
-	local unlock = page.adv(page.add(checkbox(p, "Unlock the frames (the row shows here so you can drag it)", "locked", LEFT, -422,
+	local unlock = page.adv(page.add(checkbox(p, "Unlock to drag the row", "locked", LEFT, -422,
 		function() return ns.get().locked == false end,
 		function(v) ns.get().locked = not v end)))
 	page.adv(note(p, "The same lock as the totem bar's.", LEFT + 28, -450))

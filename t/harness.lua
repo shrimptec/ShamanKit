@@ -4325,6 +4325,7 @@ do
 		CONTAINER_FAILS = true; NO_SLOTS = false
 		ns.optionsOpen = false; ns.moveMode = false
 		db.mwOn, db.mwAlways, db.mwCount, db.mwGlow, db.mwGlowSpell, db.mwAura, db.mwFrames = false, false, false, true, nil, nil, nil
+		db.mwOnlyStacks = false
 		db.mwW, db.mwH, db.mwGap, db.mwScale, db.mwCountPos, db.mwCountX, db.mwCountY = 28, 22, 3, 100, "top", 0, 0
 		db.mwColor, db.mwColorFull, db.mwColorBg, db.mwColorGlow = ns.defaults.mwColor, ns.defaults.mwColorFull, ns.defaults.mwColorBg, ns.defaults.mwColorGlow
 		db.mwErrorLog = false
@@ -4513,6 +4514,36 @@ do
 	check(#containers() == before + 3 and S.nativeDirty == false, "maelstrom: ...and is built when the fight is over")
 	db.mwW, db.mwH, db.mwColor = 28, 22, ns.defaults.mwColor; ns.updatePreview(); settle()
 	noErrors("maelstrom: the native layer raised no error")
+
+	-- ---------------------------------------------------------- only while there are stacks
+	do
+		check(ns.defaults.mwOnlyStacks == false, "maelstrom only-stacks: off by default")
+		inCombat = true; MW_AURA = nil; ticks()
+		check(mwBar().shown == true and sq[1].border.alpha ~= 0, "maelstrom only-stacks: off - the bar is up in a fight, frame and all")
+		inCombat = false; ticks()
+		db.mwOnlyStacks = true; ticks()
+		check(mwBar().shown == false, "maelstrom only-stacks: no stacks out of a fight - hidden")
+		MW_AURA = { applications = 2 }; ticks()
+		check(mwBar().shown == true and sq[1].border.alpha ~= 0, "maelstrom only-stacks: with stacks - shown, frame and all")
+		MW_AURA = nil; ticks()
+		inCombat = true; ticks()
+		check(mwBar().shown == true and S.nativeHost.alpha == 1 and sq[1].border.alpha == 0 and sq[5].bg.alpha == 0, "maelstrom only-stacks: in a fight the game's squares show alone, no frame or background")
+		db.mwAlways = true; ticks()
+		check(sq[1].border.alpha ~= 0 and mwBar().shown == true, "maelstrom only-stacks: 'always show' wins")
+		db.mwAlways = false; ticks()
+		check(sq[1].border.alpha == 0, "maelstrom only-stacks: ...and gives way again")
+		inCombat = false; ticks()
+		check(mwBar().shown == false and sq[1].border.alpha ~= 0, "maelstrom only-stacks: the fight over - hidden, frame back for the next time")
+		-- a client with no game-drawn copy: a fight with nothing readable shows nothing
+		local keepLayer, keepHost = S.layer, S.nativeHost
+		S.layer, S.nativeHost = nil, nil
+		inCombat = true; ticks()
+		check(mwBar().shown == false, "maelstrom only-stacks: no game-drawn copy - nothing readable, nothing shown")
+		inCombat = false; S.layer, S.nativeHost = keepLayer, keepHost
+		SlashCmdList.SHAMANKIT("mw only"); check(db.mwOnlyStacks == false, "maelstrom only-stacks: /shamankit mw only toggles")
+		SlashCmdList.SHAMANKIT("mw only"); check(db.mwOnlyStacks == true, "maelstrom only-stacks: ...both ways")
+		db.mwOnlyStacks = false; MW_AURA = nil; ticks()
+	end
 
 	-- ---------------------------------------------------------- the glow on the action buttons
 	local function actionBtn(n) return _G[(n <= 12 and "ActionButton" .. n) or ("MultiBarBottomLeftButton" .. (n - 12))] end
@@ -4729,7 +4760,7 @@ do
 
 	-- ---------------------------------------------------------- the settings page
 	check(ns.categories.mw ~= nil and page ~= nil and page.name == "Maelstrom", "maelstrom settings: a Maelstrom page is registered (the seventh)")
-	for _, key in ipairs({ "mwOn", "mwAlways", "mwCount", "mwGlow", "mwErrorLog" }) do check(boxFor(key) ~= nil, "maelstrom settings: a box for " .. key) end
+	for _, key in ipairs({ "mwOn", "mwAlways", "mwOnlyStacks", "mwCount", "mwGlow", "mwErrorLog" }) do check(boxFor(key) ~= nil, "maelstrom settings: a box for " .. key) end
 	page.OnRefresh()
 	local onBox = boxFor("mwOn")
 	check(onBox.checked == false, "maelstrom settings: the switch shows off")
@@ -4832,7 +4863,7 @@ do
 		callOn = false, callTotemic = true, callRecall = false, callShow = "bar", callScale = 55, callSide = "right", callAnchor = "bar", callAlign = "start", callChoice = 0,
 		posCallOwn = true, posCallSide = "left", posCallAlign = "start", posTotemicOwn = true, posTotemicSide = "top", posTotemicAlign = "center",
 		posRecallOwn = true, posRecallSide = "right", posRecallAlign = "start", showAdvanced = false, buffBadge = true,
-		mwOn = false, mwAlways = false, mwCount = false, mwCountPos = "top", mwW = 28, mwH = 22, mwGap = 3, mwScale = 100, mwGlow = true, mwErrorLog = false,
+		mwOn = false, mwAlways = false, mwOnlyStacks = false, mwCount = false, mwCountPos = "top", mwW = 28, mwH = 22, mwGap = 3, mwScale = 100, mwGlow = true, mwErrorLog = false,
 		mwPoint = "CENTER", mwRelPoint = "CENTER", mwX = 0, mwY = -150,
 	}
 	local bad = {}

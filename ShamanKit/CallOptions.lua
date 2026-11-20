@@ -17,9 +17,9 @@ function ns.buildCallsPage(ui)
 
 	-- ---- left column: what, when, how big
 	header(p, "Buttons", LEFT, -78, COLW)
-	local call = page.add(checkbox(p, "Call of the ... (Elements, Ancestors, Spirits)", "callOn", LEFT, -102))
-	note(p, "Click its small arrow to pick another Call spell.", LEFT + 28, -128)
-	local totemic = page.add(checkbox(p, "Totemic Call (brings your totems to you)", "callTotemic", LEFT, -152))
+	local call = page.add(checkbox(p, "Call of the ... (one button)", "callOn", LEFT, -102))
+	note(p, "Elements, Ancestors or Spirits: click its small arrow to pick.", LEFT + 28, -128)
+	local totemic = page.add(checkbox(p, "Totemic Call (totems to you)", "callTotemic", LEFT, -152))
 	local recall = page.add(checkbox(p, "Totemic Recall (takes them back)", "callRecall", LEFT, -178))
 
 	header(p, "Show", LEFT, -224, COLW)

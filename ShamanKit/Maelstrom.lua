@@ -40,6 +40,7 @@ local PREFIX = "|cff33ff99ShamanKit|r Maelstrom: "
 local D = ns.defaults
 D.mwOn = false                           -- the whole module (bar and glow) starts off, like every new feature
 D.mwAlways = false                       -- show the bar all the time (off: with stacks, or in a fight)
+D.mwOnlyStacks = false                   -- show it ONLY while you have stacks, also in a fight (off: it is up in every fight)
 D.mwCount = false                        -- the stack count as a number by the bar
 D.mwCountPos = "top"                     -- "top" (above), "center", "bottom" (below)
 D.mwCountX, D.mwCountY = 0, 0            -- fine offset of the count, pixels
@@ -647,6 +648,16 @@ end
 
 local function sampleOn() return ns.optionsOpen == true and not InCombatLockdown() end
 
+-- the squares' border and background (ours): hidden in a fight in "only with stacks" mode, so an empty bar is invisible
+local function setChrome(on)
+	if S.chrome == on then return end
+	S.chrome = on
+	for i = 1, MAX do
+		S.squares[i].border:SetAlpha(on and 1 or 0)
+		S.squares[i].bg:SetAlpha(on and 1 or 0)
+	end
+end
+
 -- one pass: read, show or hide the bar, paint it. Runs ~20 times a second while the module is on.
 local function update()
 	local stacks = getStacks()
@@ -658,14 +669,19 @@ local function update()
 	-- a settings page or Move mode is open: show the bar even when empty, with 3 sample stacks (a real reading wins)
 	local sample = false
 	if sampleOn() and not secret and stacks == 0 then sample = true end
-	local shown = sample or db.mwAlways or inFight or secret or stacks > 0
+	local only = db.mwOnlyStacks and not db.mwAlways
+	local native = S.layer and inFight and not S.test and not ns.moveMode
+	-- "only with stacks": in a fight nothing can be read, but the game's own bars are empty without the buff, so the
+	-- bar stays up with its frames and background hidden (setChrome) and only the game's filled squares show
+	local shown = sample or db.mwAlways or (inFight and not only) or secret or stacks > 0 or (only and native and true) or false
 	if not shown then
 		if bar:IsShown() then bar:Hide() end
+		setChrome(true)
 		return
 	end
 	if not bar:IsShown() then bar:Show() end
 	local v = sample and 3 or stacks
-	local native = S.layer and inFight and not S.test and not ns.moveMode
+	setChrome(not (only and native))
 
 	-- the count: a secret value can't become text; in a fight the game writes its own
 	if db.mwCount then
@@ -717,6 +733,7 @@ local function shutdown()
 	S.lastWant = false
 	S.glowDirty = true
 	S.ownShown, S.paintedV = nil, nil
+	setChrome(true)
 end
 
 -- the settings that decide the look, as one string: nothing is written while it has not changed
@@ -987,7 +1004,7 @@ local function setRGB(key, rest, usage)
 	end
 end
 
-local HELP = "/shamankit mw  options | move | lock | always | color | count | size | scale | glow | glowspell | glowframe | glowscan | test <0-5> | aura <name> | reset | setup | native retry | log | testerror | debug"
+local HELP = "/shamankit mw  options | move | lock | always | only | color | count | size | scale | glow | glowspell | glowframe | glowscan | test <0-5> | aura <name> | reset | setup | native retry | log | testerror | debug"
 
 -- arg: what follows "/shamankit mw" (or "/mw"), case kept (frame names are case-sensitive)
 function ns.mwSlash(arg)
@@ -1009,6 +1026,8 @@ function ns.mwSlash(arg)
 		say("locked")
 	elseif cmd == "always" then
 		toggle("mwAlways", "always show")
+	elseif cmd == "only" then
+		toggle("mwOnlyStacks", "only with stacks")
 	elseif cmd == "color" or cmd == "couleur" then
 		local first = rest:match("^(%a+)")
 		local usage = "/shamankit mw color [full|bg|glow] <r> <g> <b>  (values from 0 to 1)"
