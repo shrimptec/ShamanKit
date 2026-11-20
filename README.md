@@ -16,7 +16,7 @@ Small helpers for shamans, for World of Warcraft: Forever, in the default UI sty
   nudges, screen positions, spacing, per-button placement, range-accuracy) sit behind a **Show advanced** button at the
   top right of the page; it is one switch for every page, and nothing changes in how the addon works.
 - **Move mode**: one "Move on screen" button on every settings page (or `/shamankit move`) puts the totem bar, the buff
-  icons, the cure row and the Call buttons on screen at once as labelled frames you drag where you want them. Pieces that
+  icons, the cure row, the Call buttons and the Maelstrom bar and its count on screen at once as labelled frames you drag where you want them. Pieces that
   sit on top of each other turn red and are named. Moving something that sat on the bar or the player frame gives it a
   place of its own. It is for out of combat only, and a fight ends it.
 - **Call spells**: optional buttons at the totem bar (any side, any alignment, nudge and size are settings) or in a place of
@@ -25,13 +25,29 @@ Small helpers for shamans, for World of Warcraft: Forever, in the default UI sty
   Ancestors / Spirits with a small arrow to pick which, like the default totem bar, plus Totemic Call and Totemic
   Recall. Each is its own option (all off until you switch them on), and each only shows when you know the spell. In a
   fight a click casts as normal, but choosing another Call spell waits until the fight is over.
+- **Maelstrom Weapon bar** (the MaelstromBar addon, folded in; off until you tick *Show the Maelstrom Weapon bar* on the
+  Maelstrom page): five squares that fill with your stacks, a different colour at 5, and an optional stack count above,
+  in the middle of or below the bar (drag it in Move mode, or set an offset). Shown with at least 1 stack or in a fight, or
+  all the time (option). Size (width, height, spacing), scale, the four colours (stacks 1 to 4, 5 stacks, background, glow)
+  are settings. In a fight the game itself draws the squares, the count and the glow (an aura container, the same route
+  as the Lightning Shield icon), so nothing needs setting up; it is built out of combat, and a change made in a fight
+  (colour, size, count) is applied when the fight ends. Out of combat the buff (spell id 408505, name as a fallback, or a
+  buff name of your own) is read about 20 times a second. A pulsing **glow** on every action button holding Lightning
+  Bolt (spells, macros with `#showtooltip` / `/cast` / `/use` / `/castsequence`, ElvUI / Bartender / Dominos buttons and
+  other UIs, found by a scan) at 5 stacks; the spell and extra frames to glow are settings. `/shamankit mw` (also `/mw`,
+  `/maelstrombar`): `options`, `move` / `lock`, `always`, `color [full|bg|glow] r g b`, `count [pos above|center|below | offset x y]`,
+  `size w h [gap]`, `scale 0.5-3`, `glow`, `glowspell name|id`, `glowframe FrameName|clear`, `glowscan`, `test 0-5`
+  (fake stacks, 20 seconds), `aura BuffName`, `reset`, `setup`, `native [retry]`, `debug`, and `log` / `testerror` for an
+  optional recorder of Lua errors from the whole game (tick box on the page, off by default). It stays off while the
+  separate MaelstromBar addon is installed (remove it). Based on MaelstromBar by drbmk (Petitcorps), MIT licence, which is
+  quoted in the header of `Maelstrom.lua`. The French translation of the original is not included.
 - **Cures**: Cure Disease (tan), Cure Poison (green) and, for an Orc, Shatter Curse (purple) light up, on the action bar
   buttons that hold them and in an optional small icon row, while a debuff they can remove is on you. The game draws the
   highlight (an aura container), so it works in a fight too. Click a lit icon in the row to cast that cure on yourself (also in a fight; can be switched off). Unlocking the frames only shows the row while a ShamanKit settings page is open, so you can drag it. Own settings page; it can be switched off. Replaces the
   separate CureWatch addon (ShamanKit stays off while CureWatch is installed).
 
-Settings: Esc > Options > AddOns > ShamanKit (a home page and five pages: Totem bar, Totems, Buffs, Cures, Call spells), or `/shamankit`.
-`/shamankit buffs` (or `bar`, `totems`, `cures`, `calls`) opens a page, `/shamankit cures test` lights the cures for a few seconds, `/shamankit lock | unlock` locks or unlocks the frames,
+Settings: Esc > Options > AddOns > ShamanKit (a home page and six pages: Totem bar, Totems, Buffs, Cures, Call spells, Maelstrom), or `/shamankit`.
+`/shamankit buffs` (or `bar`, `totems`, `cures`, `calls`, `mw`) opens a page, `/shamankit cures test` lights the cures for a few seconds, `/shamankit lock | unlock` locks or unlocks the frames,
 `/shamankit reset` puts the bar and the icons back in their usual place, and `/shamankit status` prints what the addon
 reads for the totems and the buff icons. `/totemrange` still works too.
 

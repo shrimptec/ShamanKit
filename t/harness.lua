@@ -79,6 +79,7 @@ local function auraButton()
 	rawset(b, "SetIcon", function(self, tex) self.iconTex = tex end)
 	rawset(b, "ClearAllPoints", function(self) self.anchor = nil end)
 	rawset(b, "ClearApplicationCount", function(self) self.countFS, self.countOpts = nil, nil; self.cleared = (self.cleared or 0) + 1 end)
+	rawset(b, "SetApplicationBar", function(self, sb, opts) self.appBar, self.appOpts = sb, opts end)
 	rawset(b, "SetApplicationCount", function(self, fs, opts)
 		if opts and opts.formatter and BAD_FORMATTER then error("bad options") end
 		self.countFS, self.countOpts = fs, opts
@@ -134,6 +135,7 @@ GameTooltip = mock("tt"); GameTooltip_Hide = function() end
 SOUNDKIT = {}; PlaySound = function() end
 function unpack_(...) return ... end
 unpack = unpack or table.unpack
+time, date = os.time, os.date     -- the game's own globals
 MAX_TOTEMS = 4
 -- spells this pretend client "has": the catalogue ids except 2062, 8170, 8166, 6495, 25908 and 1535 (so the picker's
 -- filtering is exercised); Forever's own Fire Nova is 408341
@@ -255,9 +257,11 @@ load("ShamanKit/ShamanKit.lua")
 load("ShamanKit/Cures.lua")
 load("ShamanKit/Calls.lua")
 load("ShamanKit/Badges.lua")
+load("ShamanKit/Maelstrom.lua")
 load("ShamanKit/Options.lua")
 load("ShamanKit/CureOptions.lua")
 load("ShamanKit/CallOptions.lua")
+load("ShamanKit/MaelstromOptions.lua")
 load("ShamanKit/Move.lua")
 
 local ev
@@ -297,7 +301,7 @@ fire("ADDON_LOADED", "ShamanKit")
 rawset(_G.ShamanKitBar, "protected", true)
 check(ShamanKitDB and ShamanKitDB.size == 36, "defaults filled")
 check(savedCat ~= nil, "settings category registered")
-check(#allCats == 6, "settings: a home page and five sub-pages (" .. #allCats .. " registered)")
+check(#allCats == 7, "settings: a home page and six sub-pages (" .. #allCats .. " registered)")
 -- the older checks talk to "the panel": that is now all three pages at once
 do
 	local pages = {}
@@ -2033,7 +2037,7 @@ do
 	local function settle() runTimers() end
 	-- the Cures module listens on a frame of its own: find it by the events it registered
 	local cf
-	for _, f in ipairs(frames) do if f.registered and f.registered.ACTIONBAR_SLOT_CHANGED and f.registered.UNIT_AURA then cf = f end end
+	for _, f in ipairs(frames) do if f.registered and f.registered.ACTIONBAR_SLOT_CHANGED and f.registered.UNIT_AURA and f.registered.SPELLS_CHANGED then cf = f end end
 	assert(cf, "the Cures frame registered its events")
 	local function cfire(e, ...) cf.scripts.OnEvent(cf, e, ...) end
 	local function both(e, ...) fire(e, ...); cfire(e, ...) end
@@ -2544,7 +2548,9 @@ do
 		PLAYER_REGEN_DISABLED = true, PLAYER_REGEN_ENABLED = true, ADDON_ACTION_BLOCKED = true, ADDON_ACTION_FORBIDDEN = true,
 		UNIT_AURA = true, UNIT_INVENTORY_CHANGED = true, PLAYER_EQUIPMENT_CHANGED = true,
 		-- the cures: all of these appear in addons installed for this client (RareScanner, CampingKit, ForeverFishing, WhatsTraining)
-		SPELLS_CHANGED = true, PLAYER_LEVEL_UP = true, ACTIONBAR_SLOT_CHANGED = true, ACTIONBAR_PAGE_CHANGED = true, SPELL_UPDATE_COOLDOWN = true }
+		SPELLS_CHANGED = true, PLAYER_LEVEL_UP = true, ACTIONBAR_SLOT_CHANGED = true, ACTIONBAR_PAGE_CHANGED = true, SPELL_UPDATE_COOLDOWN = true,
+		-- the Maelstrom bar: from the MaelstromBar addon's source, which registers it in a pcall (older clients may lack it)
+		UPDATE_BONUS_ACTIONBAR = true }
 	local seen, unknown = {}, nil
 	for _, n in ipairs(REGISTERED) do seen[n] = true; if not known[n] then unknown = n end end
 	check(seen.UNIT_AURA and seen.UNIT_INVENTORY_CHANGED and seen.PLAYER_EQUIPMENT_CHANGED, "icons: the three events are registered")
@@ -3290,7 +3296,7 @@ do
 		Settings.RegisterCanvasLayoutSubcategory = nil
 		ns.buildOptions()
 		Settings.RegisterCanvasLayoutSubcategory = sub
-		check(#allCats == before + 6, "no sub-page support: the pages become categories of their own")
+		check(#allCats == before + 7, "no sub-page support: the pages become categories of their own")
 	end
 
 	-- /shamankit status prints both readings
@@ -4030,7 +4036,7 @@ do
 	end
 	setup()
 	check(type(ns.moveStart) == "function" and type(ns.moveStop) == "function" and type(ns.moveResetAll) == "function", "move: the mode has start, stop and reset")
-	check(#ns.moveProviders == 3, "move: the bar and buffs, the cure row and the Call buttons each offer pieces (" .. #ns.moveProviders .. ")")
+	check(#ns.moveProviders == 4, "move: the bar and buffs, the cure row, the Call buttons and the Maelstrom bar each offer pieces (" .. #ns.moveProviders .. ")")
 	check(M.on == false and ns.moveMode ~= true, "move: off to begin with")
 	for i, pg in ipairs(savedCat.pages) do
 		check(pg.moveButton ~= nil, "move: page " .. i .. " has the 'Move on screen' button")
@@ -4169,7 +4175,7 @@ do
 	check(M.on == false and ns.moveMode == false and not overlayFor("bar").shown and M.panel.shown == false, "move: a fight starting ends it and puts the frames away")
 	inCombat = false
 
-	local latest = allCats[#allCats - 4].panel                    -- a page of the newest build of the settings (an earlier test rebuilt them)
+	local latest = allCats[#allCats - 5].panel                    -- a page of the newest build of the settings (an earlier test rebuilt them)
 	-- Done: the settings window comes back, the samples go when no page is open
 	reopened = 0
 	setup(); settle()
@@ -4256,7 +4262,7 @@ do
 	check(ShamanKitLogDB.lines[#ShamanKitLogDB.lines]:find("PROBE one"), "log file: a log line goes into ShamanKitLogDB")
 	check(ShamanKitDB.log == nil, "log file: ...and never into the settings")
 	local clean = true
-	for k, v in pairs(ShamanKitDB) do if type(v) == "table" and k ~= "hold" and k ~= "order" and k ~= "reserve" then clean = false end end
+	for k, v in pairs(ShamanKitDB) do if type(v) == "table" and k ~= "hold" and k ~= "order" and k ~= "reserve" and not k:find("^mwColor") then clean = false end end
 	check(clean, "log file: the settings hold no table of log lines")
 	-- an older version's settings still carry a log: it is dropped, and the old lines are not copied anywhere
 	loadFresh({ size = 41, log = { "1.0 old line" } }, { lines = { "2.0 kept line" } })
@@ -4284,6 +4290,535 @@ do
 	loadFresh(keep, ShamanKitLogDB)
 end
 
+-- ---- Maelstrom: the Maelstrom Weapon bar and the glow on Lightning Bolt (Maelstrom.lua, MaelstromOptions.lua)
+do
+	local db = ShamanKitDB
+	local S = ns.mwState
+	local page = savedCat.pages[7]
+	local function settle() runTimers(); runTimers() end
+	local function ticks(n) for _ = 1, n or 1 do for _, f in ipairs(TICKERS) do f() end end end
+	local function mwBar() return _G.ShamanKitMaelstrom end
+	local mf
+	for _, f in ipairs(frames) do if f.registered and f.registered.UPDATE_BONUS_ACTIONBAR then mf = f end end
+	assert(mf, "the Maelstrom frame registered its events")
+	local function mfire(e, ...) mf.scripts.OnEvent(mf, e, ...) end
+	local function containers()
+		local list = {}
+		for _, f in ipairs(frames) do if f.kind == "AuraContainer" and f.slots and f.slots.mwsq1 then list[#list + 1] = f end end
+		return list
+	end
+	local function lines(pat) local n = 0; for _, l in ipairs(ShamanKitLogDB.lines or {}) do if l:find(pat) then n = n + 1 end end return n end
+	local function boxFor(key) for _, f in ipairs(frames) do if f.settingKey == key and f.parentFrame == page then return f end end end
+
+	-- this pretend client
+	Enum = Enum or {}; Enum.NumericRuleFormatRounding = { Down = 0 }
+	MW_AURA, MW_FAILS = nil, false
+	C_UnitAuras.GetPlayerAuraBySpellID = function(id)
+		if MW_FAILS then error("Auras cannot be accessed when secret while tainted by 'ShamanKit'") end
+		if id == 408505 then return MW_AURA end
+	end
+	function UnitAffectingCombat() return inCombat end
+	MBODY = {}
+	function GetMacroBody(i) return MBODY[i] end
+	local function reset()
+		inCombat = false; AURAS_HIDDEN = false; MW_AURA = nil; MW_FAILS = false; IDAURAS = {}
+		CONTAINER_FAILS = true; NO_SLOTS = false
+		ns.optionsOpen = false; ns.moveMode = false
+		db.mwOn, db.mwAlways, db.mwCount, db.mwGlow, db.mwGlowSpell, db.mwAura, db.mwFrames = false, false, false, true, nil, nil, nil
+		db.mwW, db.mwH, db.mwGap, db.mwScale, db.mwCountPos, db.mwCountX, db.mwCountY = 28, 22, 3, 100, "top", 0, 0
+		db.mwColor, db.mwColorFull, db.mwColorBg, db.mwColorGlow = ns.defaults.mwColor, ns.defaults.mwColorFull, ns.defaults.mwColorBg, ns.defaults.mwColorGlow
+		db.mwErrorLog = false
+		S.test = nil
+	end
+	reset(); ShamanKitLogDB.lines = {}
+	ACTIONS = ACTIONS or {}
+	for i = 1, 24 do ACTIONS[i] = { "spell", 8075 } end
+
+	-- ---------------------------------------------------------- off to begin with
+	check(ns.defaults.mwOn == false and ns.defaults.mwGlow == true and ns.defaults.mwErrorLog == false, "maelstrom: defaults - the module starts off, the glow is wanted once it is on")
+	check(ns.defaults.mwW == 28 and ns.defaults.mwH == 22 and ns.defaults.mwGap == 3 and ns.defaults.mwScale == 100, "maelstrom: the standalone addon's square size")
+	check(ns.defaults.mwColor[2] == 0.55 and ns.defaults.mwColorFull[1] == 0.55 and ns.defaults.mwColorGlow[1] == 1, "maelstrom: the standalone addon's colours")
+	check(ns.defaults.mwGlowSpell == nil and ns.defaults.mwAura == nil and ns.defaults.mwFrames == nil, "maelstrom: no shared table to edit by accident")
+	check(S.built and S.active and mwBar() ~= nil, "maelstrom: the bar frame exists")
+	ns.updatePreview()
+	check(mwBar().shown == false, "maelstrom: off - the bar is not on screen")
+	MW_AURA = { applications = 3 }
+	ticks(2)
+	check(mwBar().shown == false, "maelstrom: off - stacks do not bring it up")
+	MW_AURA = nil
+
+	-- ---------------------------------------------------------- reading and showing the stacks
+	db.mwOn = true; ns.updatePreview()
+	check(mwBar().shown == false, "maelstrom: on, no stacks, not in a fight - hidden")
+	local sq = S.squares
+	check(#sq == 5 and sq[1].fill and sq[5].fullFill, "maelstrom: five squares, each with a fill and a full bar")
+	check(mwBar().w == 5 * 28 + 4 * 3 and mwBar().h == 22 and sq[3].w == 28 and sq[3].h == 22, "maelstrom: the bar is five squares and four gaps long")
+	MW_AURA = { applications = 2 }
+	ticks()
+	check(mwBar().shown == true and sq[1].fill.value == 2 and sq[5].fill.value == 2 and sq[5].fullFill.value == 2, "maelstrom: 2 stacks - the value goes to every square")
+	check(sq[2].fill.sbcolor[1] == 0 and sq[2].fill.sbcolor[2] == 0.55 and sq[2].fullFill.sbcolor[1] == 0.55, "maelstrom: normal colour for 1 to 4, full colour for 5")
+	MW_AURA = { applications = 5 }
+	ticks()
+	check(sq[4].fill.value == 5 and sq[4].fullFill.value == 5, "maelstrom: 5 stacks")
+	MW_AURA = { applications = 0 }
+	ticks()
+	check(sq[1].fill.value == 1 and mwBar().shown == true, "maelstrom: a buff with no count reads as 1 stack")
+	MW_AURA = nil
+	ticks()
+	check(mwBar().shown == false, "maelstrom: stacks gone - hidden again")
+	db.mwAlways = true; ticks()
+	check(mwBar().shown == true and sq[1].fill.value == 0, "maelstrom: 'always show' shows it empty")
+	db.mwAlways = false; ticks()
+	check(mwBar().shown == false, "maelstrom: ...and off again")
+	-- by name (another id): found by the scan, which only runs twice a second
+	IDAURAS = { [1] = { auraInstanceID = 1, name = "Maelstrom Weapon", spellId = 999999, applications = 4 } }
+	t = t + 1; ticks()
+	check(sq[1].fill.value == 4, "maelstrom: a buff with another id is found by its name")
+	IDAURAS = {}
+	t = t + 0.1; ticks()
+	check(sq[1].fill.value == 4 and mwBar().shown == true, "maelstrom: the by-name scan is not repeated within half a second")
+	t = t + 1; ticks()
+	check(mwBar().shown == false, "maelstrom: ...and sees the buff go when it does run")
+	IDAURAS = { [1] = { auraInstanceID = 1, name = "My Own Buff", spellId = 5, applications = 3 } }
+	db.mwAura = "my own buff"; t = t + 1; ticks()
+	check(sq[1].fill.value == 3, "maelstrom: a buff name of your own is followed")
+	db.mwAura = nil; IDAURAS = {}; t = t + 1; ticks()
+	-- the game refuses the read (a fight): no error, and a fight shows the bar
+	MW_FAILS = true; AURAS_HIDDEN = true; inCombat = true
+	ticks()
+	check(mwBar().shown == true, "maelstrom: in a fight the bar is up whatever can be read")
+	noErrors("maelstrom: a refused aura read raises no error")
+	check(lines("MAELSTROM read error") == 0, "maelstrom: ...and is not an error line either")
+	-- something unexpected thrown while reading: logged once, not an error popup
+	do
+		local bad = setmetatable({}, { __index = function() error("exotic failure") end })
+		MW_FAILS = false; MW_AURA = bad; S.lastErr = nil; ShamanKitLogDB.lines = {}
+		ticks(5)
+		check(lines("MAELSTROM read error") == 1, "maelstrom: an unexpected read failure is logged once, not every tick (" .. lines("MAELSTROM read error") .. ")")
+		noErrors("maelstrom: ...and raises no error line")
+		MW_AURA = nil
+	end
+	-- a secret stack count goes straight to the bars, never compared
+	MW_FAILS = false
+	local sec = secret()
+	MW_AURA = { applications = sec }
+	ticks()
+	check(rawequal(sq[1].fill.value, sec) and rawequal(sq[5].fullFill.value, sec), "maelstrom: a secret count goes straight into the status bars")
+	check(S.count.shown == false, "maelstrom: ...and no number is made of it")
+	noErrors("maelstrom: a secret count raises no error")
+	MW_AURA = nil; inCombat = false; AURAS_HIDDEN = false; ticks()
+
+	-- ---------------------------------------------------------- the count
+	db.mwCount = true; MW_AURA = { applications = 4 }; ticks()
+	check(S.count.shown == true and S.count.text == "4", "maelstrom: the stack count shows the number")
+	check(S.count.anchor[1] == "BOTTOM" and S.count.anchor[2] == mwBar() and S.count.anchor[3] == "TOP" and S.count.anchor[5] == 4, "maelstrom: above the bar by default")
+	db.mwCountPos = "bottom"; ns.updatePreview()
+	check(S.count.anchor[1] == "TOP" and S.count.anchor[3] == "BOTTOM" and S.count.anchor[5] == -4, "maelstrom: below the bar")
+	db.mwCountPos = "center"; db.mwCountX, db.mwCountY = 5, -6; ns.updatePreview()
+	check(S.count.anchor[1] == "CENTER" and S.count.anchor[3] == "CENTER" and S.count.anchor[4] == 5 and S.count.anchor[5] == -6, "maelstrom: in the middle, with the offset")
+	db.mwCountPos, db.mwCountX, db.mwCountY = "top", 0, 0; ns.updatePreview()
+	db.mwCount = false; ticks()
+	check(S.count.shown == false, "maelstrom: count off")
+	MW_AURA = nil; ticks()
+
+	-- ---------------------------------------------------------- a settings page open: a sample, a real reading wins
+	ns.optionsOpen = true; ns.updatePreview()
+	check(mwBar().shown == true and sq[2].fill.value == 3, "maelstrom: a settings page open shows the bar with 3 sample stacks")
+	MW_AURA = { applications = 1 }; ticks()
+	check(sq[2].fill.value == 1, "maelstrom: ...a real reading replaces the sample")
+	MW_AURA = nil
+	ns.optionsOpen = false; ticks()
+	check(mwBar().shown == false, "maelstrom: ...and the sample goes with the page")
+
+	-- ---------------------------------------------------------- size, scale, position, colours
+	db.mwW, db.mwH, db.mwGap = 40, 30, 5; db.mwScale = 150; ns.updatePreview()
+	check(sq[2].w == 40 and sq[2].h == 30 and sq[2].anchor[4] == 45, "maelstrom: squares follow width, height and spacing")
+	db.mwX, db.mwY = 100, -50; ns.updatePreview()
+	check(mwBar().anchor[1] == "CENTER" and mwBar().anchor[4] == 100 and mwBar().anchor[5] == -50, "maelstrom: the saved position")
+	db.mwW, db.mwH, db.mwGap, db.mwScale = "junk", 1e9, -5, {}; ns.updatePreview()
+	check(mwBar().w == 5 * 28 + 4 * 0 and mwBar().h == 60, "maelstrom: damaged sizes are clamped")
+	db.mwColor = "junk"; db.mwColorFull = { 1, "x" }; ns.updatePreview(); MW_AURA = { applications = 3 }; db.mwAlways = true; ticks()
+	check(sq[1].fill.sbcolor[2] == 0.55, "maelstrom: a damaged colour falls back to the default")
+	reset(); db.mwOn = true; ns.updatePreview(); MW_AURA = nil
+
+	-- ---------------------------------------------------------- the test command and the settings page buttons
+	check(ns.mwTest(4) == 4, "maelstrom: test 4")
+	check(mwBar().shown == true and sq[1].fill.value == 4, "maelstrom: fake stacks show")
+	runTimers()
+	check(S.test == nil and mwBar().shown == false, "maelstrom: fake stacks end by themselves")
+	SlashCmdList.SHAMANKIT("mw test 3"); check(S.test == 3, "maelstrom: /shamankit mw test 3")
+	SlashCmdList.SHAMANKIT("mw test 0"); check(S.test == nil, "maelstrom: test 0 stops it")
+	check(ns.mwTest(9) == nil, "maelstrom: a number out of range stops it")
+
+	-- ---------------------------------------------------------- the game-drawn copy for a fight
+	CONTAINER_FAILS = true
+	SlashCmdList.SHAMANKIT("mw native retry")
+	check(S.layer == nil and S.nativeFailed == true and ns.mwCombatState() == "unavailable", "maelstrom: no aura container on this client - said plainly")
+	check(lines("native layer unavailable") >= 1, "maelstrom: ...and logged")
+	CONTAINER_FAILS = false
+	inCombat = true; SlashCmdList.SHAMANKIT("mw native retry"); inCombat = false
+	check(S.layer == nil and #containers() == 0, "maelstrom: nothing is built in a fight")
+	SlashCmdList.SHAMANKIT("mw native retry")
+	local c1 = containers()[#containers()]
+	check(S.layer and c1 and ns.mwCombatState() == "ready", "maelstrom: built out of combat")
+	check(c1.unit == "player" and LOADED_ADDONS.Blizzard_AuraContainer, "maelstrom: watches the player, with the game's container addon loaded")
+	local nSlots = 0; for _ in pairs(c1.slots) do nSlots = nSlots + 1 end
+	check(nSlots == 10, "maelstrom: two slots per square (" .. nSlots .. ")")
+	local s3, f3 = c1.slots.mwsq3, c1.slots.mwfull3
+	check(s3.filter == "HELPFUL" and s3.opts.candidateFilters.includeSpellIDs[408505] and s3.opts.candidateFilters.includeSpellIDs[53817], "maelstrom: each slot is limited to the buff by spell id")
+	check(s3.button.appOpts.minApplications == 2 and s3.button.appOpts.maxApplications == 3, "maelstrom: square 3 fills from 2 to 3 stacks")
+	check(f3.button.appOpts.minApplications == 4 and f3.button.appOpts.maxApplications == 5, "maelstrom: the full bar is 4 to 5 stacks")
+	check(s3.button.anchor[1] == "BOTTOMRIGHT" and s3.button.anchor[4] == 2 * 31 + 28 - 2 and s3.button.anchor[5] == -20, "maelstrom: square 3 sits at its own square, inset 2 px")
+	check(s3.button.appBar.sbcolor[2] == 0.55 and f3.button.appBar.sbcolor[1] == 0.55, "maelstrom: the two colours")
+	check(s3.button.countFS == nil and c1.slots.mwsq1.button.countFS == nil, "maelstrom: no game-written count while the count is off")
+	-- in a fight the game's copy is shown and ours is hidden
+	MW_AURA = { applications = 3 }; ticks()
+	check(S.nativeHost.alpha == 0 and sq[1].fill.shown ~= false, "maelstrom: out of a fight our own squares show")
+	inCombat = true; ticks()
+	check(S.nativeHost.alpha == 1 and sq[1].fill.shown == false and sq[5].fullFill.shown == false, "maelstrom: in a fight the game's copy shows and ours steps aside")
+	check(mwBar().shown == true, "maelstrom: ...inside a bar that stays")
+	inCombat = false; ticks()
+	check(S.nativeHost.alpha == 0 and sq[1].fill.shown == true and sq[1].fill.value == 3, "maelstrom: the fight over, ours are back")
+	MW_AURA = nil; ticks()
+	-- test stacks are ours even in a fight
+	inCombat = true; ns.mwTest(2); ticks()
+	check(S.nativeHost.alpha == 0 and sq[1].fill.value == 2, "maelstrom: fake stacks are drawn by us, also in a fight")
+	ns.mwTest(0); inCombat = false; ticks()
+	-- the count written by the game
+	db.mwCount = true; ns.updatePreview(); settle()
+	local c2 = containers()[#containers()]
+	check(c2 ~= c1 and c2.slots.mwsq1.button.countFS ~= nil and c2.slots.mwsq1.button.countOpts.formatter ~= nil, "maelstrom: the count turned on - rebuilt, and the game writes the number (with a formatter so 1 shows)")
+	check(c2.slots.mwsq2.button.countFS == nil, "maelstrom: ...in one place only")
+	MW_AURA = { applications = 3 }; inCombat = true; ticks()
+	check(S.count.shown == false, "maelstrom: in a fight our own number steps aside for the game's")
+	inCombat = false; ticks()
+	check(S.count.shown == true and S.count.text == "3", "maelstrom: ...and is back after it")
+	MW_AURA = nil; ticks()
+	db.mwCount = false; ns.updatePreview(); settle()
+	-- changes come in a burst (a slider): one rebuild once they stop
+	local before = #containers()
+	for w = 30, 36 do db.mwW = w; ns.updatePreview() end
+	check(#containers() == before, "maelstrom: nothing is rebuilt while a slider is still moving")
+	settle()
+	check(#containers() == before + 1, "maelstrom: ...one rebuild once it stops")
+	check(containers()[#containers()].slots.mwsq3.button.anchor[4] == 2 * (36 + 3) + 36 - 2, "maelstrom: ...at the new size")
+	db.mwColor = { 1, 0, 0 }; ns.updatePreview(); settle()
+	check(#containers() == before + 2 and containers()[#containers()].slots.mwsq2.button.appBar.sbcolor[1] == 1, "maelstrom: a new colour is a rebuild too")
+	ns.updatePreview(); settle()
+	check(#containers() == before + 2, "maelstrom: nothing changed, nothing rebuilt")
+	-- in a fight: wait for the end of it
+	inCombat = true; db.mwH = 40; ns.updatePreview(); settle()
+	check(#containers() == before + 2 and S.nativeDirty == true, "maelstrom: a change in a fight waits")
+	inCombat = false; mfire("PLAYER_REGEN_ENABLED")
+	check(#containers() == before + 3 and S.nativeDirty == false, "maelstrom: ...and is built when the fight is over")
+	db.mwW, db.mwH, db.mwColor = 28, 22, ns.defaults.mwColor; ns.updatePreview(); settle()
+	noErrors("maelstrom: the native layer raised no error")
+
+	-- ---------------------------------------------------------- the glow on the action buttons
+	local function actionBtn(n) return _G[(n <= 12 and "ActionButton" .. n) or ("MultiBarBottomLeftButton" .. (n - 12))] end
+	for i = 1, 24 do ACTIONS[i] = { "spell", 8075 } end
+	ACTIONS[3] = { "spell", 403 }                                    -- Lightning Bolt
+	ACTIONS[14] = { "macro", 9 }                                     -- a macro that casts it
+	MBODY[9] = "#showtooltip\n/cast [nomod] Lightning Bolt; Healing Wave"
+	ACTIONS[16] = { "macro", 10 }
+	MBODY[10] = "/castsequence reset=5 Lightning Shield, Lightning Bolt"
+	ACTIONS[18] = { "macro", 11 }
+	MBODY[11] = "/cast Healing Wave"                                  -- not it
+	S.glowDirty = true; ticks()
+	local function glowing() local n = 0; for _ in pairs(S.glowActive) do n = n + 1 end return n end
+	check(glowing() == 3 and S.glowActive[actionBtn(3)] and S.glowActive[actionBtn(14)] and S.glowActive[actionBtn(16)], "maelstrom: glow on the spell, a macro and a castsequence that cast Lightning Bolt (" .. glowing() .. ")")
+	check(not S.glowActive[actionBtn(18)] and not S.glowActive[actionBtn(5)], "maelstrom: ...and on nothing else")
+	local g3 = S.glowFrames[actionBtn(3)]
+	check(g3.shown == true and g3.ag.playing == true and g3.parentFrame == actionBtn(3), "maelstrom: a pulsing frame on the button")
+	check(g3.border.sbcolor[1] == 1 and g3.border.sbcolor[3] == 0.2, "maelstrom: in the glow colour")
+	MW_AURA = { applications = 5 }; ticks()
+	check(g3.border.value == 5 and g3.fill.value == 5, "maelstrom: at 5 stacks the layers fill")
+	MW_AURA = { applications = 2 }; ticks()
+	check(g3.border.value == 2, "maelstrom: below 5 the value is the stack count (the layers' range is 4 to 5, so it stays empty)")
+	do   -- a secret value can't be compared, so it is written every tick (a plain one only when it changes)
+		local writes = 0
+		rawset(g3.border, "SetValue", function(self, v) writes = writes + 1; self.value = v end)
+		MW_AURA = { applications = secret() }; ticks()
+		local w1 = writes
+		ticks()
+		check(writes > w1, "maelstrom: a secret value is written to the glow every tick")
+		MW_AURA = { applications = 2 }; ticks()
+		local w2 = writes
+		ticks(3)
+		check(writes == w2, "maelstrom: a plain value is written once")
+		rawset(g3.border, "SetValue", nil)
+	end
+	local host3 = S.glowNatives[actionBtn(3)]
+	check(host3 and host3.alpha == 0, "maelstrom: the game's own copy of the glow is made out of combat, quiet out of a fight")
+	local gc; for _, f in ipairs(frames) do if f.kind == "AuraContainer" and f.slots and f.slots.mwglow1 and f.parentFrame == host3 then gc = f end end
+	check(gc and gc.slots.mwglow3 and gc.slots.mwglow1.button.appOpts.minApplications == 5 and gc.slots.mwglow1.button.appOpts.maxApplications == 5, "maelstrom: ...visible at exactly 5 stacks")
+	inCombat = true; ticks()
+	check(host3.alpha == 1, "maelstrom: in a fight the game's copy shows")
+	-- a button that gets Lightning Bolt in a fight waits for its copy
+	ACTIONS[7] = { "spell", 403 }
+	mfire("ACTIONBAR_SLOT_CHANGED", 7); ticks()
+	check(S.glowActive[actionBtn(7)] and S.glowNatives[actionBtn(7)] == nil and S.glowNativePending == true, "maelstrom: a glow that appears in a fight gets its copy later")
+	inCombat = false; mfire("PLAYER_REGEN_ENABLED"); ticks()
+	check(S.glowNatives[actionBtn(7)] ~= nil and S.glowNativePending == false, "maelstrom: ...when the fight is over")
+	-- an action bar change
+	ACTIONS[7] = { "spell", 8075 }; mfire("ACTIONBAR_SLOT_CHANGED", 7); ticks()
+	check(not S.glowActive[actionBtn(7)] and S.glowFrames[actionBtn(7)].shown == false and S.glowFrames[actionBtn(7)].ag.playing == false, "maelstrom: a button that no longer holds it loses the glow")
+	-- the spell to glow
+	SlashCmdList.SHAMANKIT("mw glowspell 8075"); ticks()
+	check(db.mwGlowSpell == "8075" and glowing() == 20 and not S.glowActive[actionBtn(3)], "maelstrom: another spell by id (" .. glowing() .. " buttons)")
+	SlashCmdList.SHAMANKIT("mw glowspell Healing Wave"); ticks()
+	check(db.mwGlowSpell == "Healing Wave" and glowing() == 2 and S.glowActive[actionBtn(14)] and S.glowActive[actionBtn(18)], "maelstrom: another spell by name, found in macros too")
+	SlashCmdList.SHAMANKIT("mw glowspell"); ticks()
+	check(db.mwGlowSpell == nil and glowing() == 3, "maelstrom: an empty spell is Lightning Bolt again")
+	-- frames of other UIs by name (case kept)
+	local other = CreateFrame("Button", "OneButtonThing")
+	SlashCmdList.SHAMANKIT("mw glowframe OneButtonThing"); ticks()
+	check(type(db.mwFrames) == "table" and db.mwFrames[1] == "OneButtonThing" and S.glowActive[other] and ns.defaults.mwFrames == nil, "maelstrom: a named frame glows too (name keeps its capitals, no shared table)")
+	SlashCmdList.SHAMANKIT("mw glowframe OneButtonThing"); ticks()
+	check(db.mwFrames == nil and not S.glowActive[other], "maelstrom: naming it again removes it")
+	SlashCmdList.SHAMANKIT("mw glowframe A"); SlashCmdList.SHAMANKIT("mw glowframe B"); SlashCmdList.SHAMANKIT("mw glowframe clear")
+	check(db.mwFrames == nil, "maelstrom: clear")
+	SlashCmdList.SHAMANKIT("mw glowscan"); SlashCmdList.SHAMANKIT("mw glowframe")
+	-- off
+	db.mwGlow = false; ticks()
+	check(glowing() == 0 and g3.shown == false and g3.ag.playing == false, "maelstrom: glow off - every frame goes")
+	db.mwGlow = true; ticks()
+	check(glowing() == 3 and g3.shown == true, "maelstrom: ...and back")
+	local before2 = CALLS.SetValue
+	db.mwGlow = false; ticks(); local mid = CALLS.SetValue
+	MW_AURA = nil; ticks(10)
+	check(CALLS.SetValue == mid or CALLS.SetValue - mid == 0, "maelstrom: nothing is written while nothing changes (" .. (CALLS.SetValue - mid) .. " writes in 10 ticks)")
+	db.mwGlow = true; ticks()
+	db.mwOn = false; ns.updatePreview()
+	check(glowing() == 0 and mwBar().shown == false and S.nativeHost.alpha == 0, "maelstrom: the module off - bar and glows go")
+	db.mwOn = true; ns.updatePreview()
+	noErrors("maelstrom: the glow raised no error")
+
+	-- ---------------------------------------------------------- a quiet bar writes nothing
+	reset(); db.mwOn = true; CONTAINER_FAILS = true; ns.updatePreview(); MW_AURA = { applications = 3 }; ticks()
+	local w0, p0, tx0 = CALLS.SetValue, CALLS.SetText, CALLS.SetTexture
+	local garbage = collectgarbage("count")
+	ticks(20)
+	check(CALLS.SetValue == w0 and CALLS.SetText == p0 and CALLS.SetTexture == tx0, "maelstrom: 20 ticks with the same stacks write nothing")
+	check(collectgarbage("count") - garbage < 40, "maelstrom: ...and make little garbage (" .. math.floor(collectgarbage("count") - garbage) .. " KB in 20 ticks)")
+	MW_AURA = nil; ticks()
+
+	-- ---------------------------------------------------------- slash commands
+	SlashCmdList.SHAMANKIT("mw always"); check(db.mwAlways == true, "maelstrom: /shamankit mw always")
+	SlashCmdList.SHAMANKIT("mw always"); check(db.mwAlways == false, "maelstrom: ...toggles")
+	SlashCmdList.SHAMANKIT("mw color 1 0.5 0.25")
+	check(db.mwColor[1] == 1 and db.mwColor[2] == 0.5 and db.mwColor[3] == 0.25 and ns.defaults.mwColor[1] == 0, "maelstrom: color (a new table, the default is untouched)")
+	SlashCmdList.SHAMANKIT("mw color full 0.1 0.2 0.3"); check(db.mwColorFull[3] == 0.3, "maelstrom: color full")
+	SlashCmdList.SHAMANKIT("mw color bg 0.3 0.2 0.1"); check(db.mwColorBg[1] == 0.3, "maelstrom: color bg")
+	SlashCmdList.SHAMANKIT("mw color glow 0 1 0"); check(db.mwColorGlow[2] == 1, "maelstrom: color glow")
+	SlashCmdList.SHAMANKIT("mw color 2 2 2"); check(db.mwColor[1] == 1, "maelstrom: a value over 1 is refused")
+	SlashCmdList.SHAMANKIT("mw color nonsense"); check(db.mwColor[1] == 1, "maelstrom: nonsense is refused")
+	SlashCmdList.SHAMANKIT("mw count"); check(db.mwCount == true, "maelstrom: count toggles")
+	SlashCmdList.SHAMANKIT("mw count pos below"); check(db.mwCountPos == "bottom", "maelstrom: count pos below")
+	SlashCmdList.SHAMANKIT("mw count pos centre"); check(db.mwCountPos == "center", "maelstrom: count pos centre")
+	SlashCmdList.SHAMANKIT("mw count pos above"); check(db.mwCountPos == "top", "maelstrom: count pos above")
+	SlashCmdList.SHAMANKIT("mw count pos sideways"); check(db.mwCountPos == "top", "maelstrom: a bad position is refused")
+	SlashCmdList.SHAMANKIT("mw count offset 10 -20"); check(db.mwCountX == 10 and db.mwCountY == -20, "maelstrom: count offset")
+	SlashCmdList.SHAMANKIT("mw count offset 999 0"); check(db.mwCountX == 10, "maelstrom: an offset out of range is refused")
+	SlashCmdList.SHAMANKIT("mw size 30 20 4"); check(db.mwW == 30 and db.mwH == 20 and db.mwGap == 4, "maelstrom: size w h gap")
+	SlashCmdList.SHAMANKIT("mw size 35 25"); check(db.mwW == 35 and db.mwH == 25 and db.mwGap == 4, "maelstrom: size without a gap keeps it")
+	SlashCmdList.SHAMANKIT("mw size 5 5"); check(db.mwW == 35, "maelstrom: a size out of range is refused")
+	SlashCmdList.SHAMANKIT("mw scale 2"); check(db.mwScale == 200, "maelstrom: scale 2 = 200%")
+	SlashCmdList.SHAMANKIT("mw scale 9"); check(db.mwScale == 200, "maelstrom: a scale out of range is refused")
+	SlashCmdList.SHAMANKIT("mw aura Some Buff"); check(db.mwAura == "Some Buff", "maelstrom: aura keeps its capitals")
+	SlashCmdList.SHAMANKIT("mw glow"); check(db.mwGlow == false, "maelstrom: glow toggles")
+	SlashCmdList.SHAMANKIT("mw glow"); check(db.mwGlow == true, "maelstrom: ...back")
+	db.mwX, db.mwY = 7, 8; SlashCmdList.SHAMANKIT("mw reset")
+	check(db.mwX == 0 and db.mwY == -150 and db.mwW == 28 and db.mwScale == 100 and db.mwH == 22 and db.mwGap == 3, "maelstrom: reset puts back position and size")
+	db.mwX, db.mwY = 7, 8; ns.resetPosition()
+	check(db.mwX == 0 and db.mwY == -150, "maelstrom: 'reset' of the whole addon puts the bar back too")
+	SlashCmdList.SHAMANKIT("mw off"); check(db.mwOn == false, "maelstrom: /shamankit mw off")
+	SlashCmdList.SHAMANKIT("mw on"); check(db.mwOn == true, "maelstrom: /shamankit mw on")
+	SlashCmdList.SHAMANKIT("mw setup"); SlashCmdList.SHAMANKIT("mw help"); SlashCmdList.SHAMANKIT("mw native"); SlashCmdList.SHAMANKIT("status")
+	check(ns.mwInfo()[1] == "on", "maelstrom: status says on")
+	savedCat.opened = nil; SlashCmdList.SHAMANKIT("mw options"); check(savedCat.opened == ns.categories.mw:GetID(), "maelstrom: /shamankit mw options opens its page")
+	SlashCmdList.SHAMANKIT("maelstrom"); check(true, "maelstrom: the long word works too")
+	check(SlashCmdList.SHAMANKITMW ~= nil and SLASH_SHAMANKITMW1 == "/mw", "maelstrom: /mw is its own command")
+	SlashCmdList.SHAMANKITMW("test 2"); check(S.test == 2, "maelstrom: /mw test 2"); ns.mwTest(0)
+	SlashCmdList.SHAMANKITMW("glowframe SomeFrame"); check(db.mwFrames and db.mwFrames[1] == "SomeFrame", "maelstrom: /mw keeps the capitals of a frame name"); SlashCmdList.SHAMANKITMW("glowframe clear")
+	do   -- /mw debug lists the buffs out of combat only
+		IDAURAS = { [1] = { auraInstanceID = 1, name = "X", spellId = 1, applications = 1 } }
+		SlashCmdList.SHAMANKIT("mw debug"); AURAS_HIDDEN = true; SlashCmdList.SHAMANKIT("mw debug"); AURAS_HIDDEN = false; IDAURAS = {}
+	end
+	SlashCmdList.SHAMANKIT("mw move"); check(ns.moveMode == true, "maelstrom: /mw move starts move mode")
+	SlashCmdList.SHAMANKIT("mw move"); check(ns.moveMode ~= true, "maelstrom: ...and again stops it")
+	SlashCmdList.SHAMANKIT("mw move"); SlashCmdList.SHAMANKIT("mw lock"); check(ns.moveMode ~= true, "maelstrom: /mw lock stops move mode")
+	noErrors("maelstrom: the commands raised no error")
+
+	-- ---------------------------------------------------------- the error recorder
+	local realSet, realGet = seterrorhandler, geterrorhandler
+	local handler
+	function geterrorhandler() return handler or function() end end
+	function seterrorhandler(f) handler = f end
+	local seen = {}
+	handler = function(m) seen[#seen + 1] = m end
+	S.errHooked = nil
+	db.mwErrorLog = false
+	ns.mwErrorLogChanged()
+	check(S.errHooked ~= true and handler ~= nil, "maelstrom: errors are not recorded while the option is off")
+	db.mwErrorLog = true; ns.mwErrorLogChanged()
+	check(S.errHooked == true, "maelstrom: the option installs the recorder")
+	ShamanKitLogDB.errors = nil
+	handler("boom one"); handler("boom one"); handler("boom two")
+	check(#ShamanKitLogDB.errors == 2 and ShamanKitLogDB.errors[1].count == 2 and #seen == 3, "maelstrom: errors are recorded, repeats counted, and passed on to the old handler")
+	SlashCmdList.SHAMANKIT("mw log"); SlashCmdList.SHAMANKIT("mw log clear")
+	check(#ShamanKitLogDB.errors == 0, "maelstrom: log clear")
+	db.mwErrorLog = false; handler("boom three")
+	check(#ShamanKitLogDB.errors == 0 and #seen == 4, "maelstrom: ...switched off again, nothing is recorded (the old handler still hears it)")
+	for i = 1, 60 do db.mwErrorLog = true; handler("e" .. i) end
+	check(#ShamanKitLogDB.errors == 50, "maelstrom: the list is capped at 50")
+	ShamanKitLogDB.errors = nil; db.mwErrorLog = false
+	ok_, err_ = pcall(function() SlashCmdList.SHAMANKIT("mw testerror") end)
+	check(ok_ == false and tostring(err_):find("test error"), "maelstrom: testerror raises one on purpose")
+	seterrorhandler, geterrorhandler = realSet, realGet
+
+	-- ---------------------------------------------------------- the standalone addon and other classes
+	do
+		LOADED_ADDONS.MaelstromBar = true
+		ns.mwInit()
+		check(S.conflict == true and S.active == false, "maelstrom: the standalone MaelstromBar loaded - this module stays off")
+		db.mwOn = true; ns.updatePreview(); ticks(); MW_AURA = { applications = 3 }; ticks()
+		check(mwBar().shown == false and glowing() == 0, "maelstrom: ...nothing shown, nothing glowing")
+		SlashCmdList.SHAMANKIT("mw always"); check(db.mwAlways == false, "maelstrom: ...and the commands say so instead of acting")
+		check(lines("MaelstromBar is loaded") >= 1, "maelstrom: ...and the log says why")
+		LOADED_ADDONS.MaelstromBar = nil
+		UnitClass = function() return "Mage", "MAGE" end
+		ns.mwInit()
+		check(S.active == false and S.conflict == false, "maelstrom: not a shaman - off")
+		UnitClass = function() return "Shaman", "SHAMAN" end
+		ns.mwInit()
+		check(S.active == true, "maelstrom: a shaman - on")
+		UnitClass = nil
+		ns.mwInit()
+		MW_AURA = nil; ns.mwTest(0)
+	end
+
+	-- ---------------------------------------------------------- Move mode
+	reset(); db.mwOn = true; db.mwCount = true; ns.updatePreview()
+	local pieces = {}
+	for _, fn in ipairs(ns.moveProviders) do for _, pc in ipairs(fn()) do pieces[pc.id] = pc end end
+	check(pieces.maelstrom and pieces.maelstrom.frame == mwBar() and pieces.maelstrom_count, "maelstrom: move mode offers the bar and the count")
+	pieces.maelstrom.drop(120, -80)
+	check(db.mwPoint == "CENTER" and db.mwRelPoint == "CENTER" and db.mwX == 120 and db.mwY == -80, "maelstrom: dropping the bar saves its middle")
+	check(mwBar().anchor[4] == 120 and mwBar().anchor[5] == -80, "maelstrom: ...and puts it there")
+	-- the count: a bar 5*28+12 = 152 x 22, the screen middle at (500, 400) on the pretend screen
+	UIParent.GetCenter = function() return 500, 400 end
+	rawset(mwBar(), "GetLeft", function() return 100 end); rawset(mwBar(), "GetBottom", function() return 300 end)
+	rawset(mwBar(), "GetSize", function() return 152, 22 end)
+	-- count above: its middle 30 right of the bar's middle (176) and 20 above its top (322): 20 + h/2
+	pieces.maelstrom_count.drop(176 - 500 + 30, 322 + 20 - 400, 10, 16)
+	check(db.mwCountX == 30 and db.mwCountY == (20 - 8) - 4, "maelstrom: dragging the count above saves its offset (" .. db.mwCountX .. ", " .. db.mwCountY .. ")")
+	db.mwCountPos = "center"
+	pieces.maelstrom_count.drop(176 - 500 - 12, 311 - 400 + 7, 10, 16)
+	check(db.mwCountX == -12 and db.mwCountY == 7, "maelstrom: ...in the middle")
+	db.mwCountPos = "bottom"
+	pieces.maelstrom_count.drop(176 - 500, 300 - 400 - 15, 10, 16)
+	check(db.mwCountX == 0 and db.mwCountY == (-15 + 8) + 4, "maelstrom: ...below")
+	pieces.maelstrom_count.drop(176 - 500 + 9999, 0, 10, 16)
+	check(db.mwCountX == 200, "maelstrom: ...an absurd drag is clamped")
+	rawset(mwBar(), "GetLeft", nil); rawset(mwBar(), "GetBottom", nil); rawset(mwBar(), "GetSize", nil); UIParent.GetCenter = nil
+	check(type(pieces.maelstrom_count.rect) == "function" and pieces.maelstrom_count.rect() == nil, "maelstrom: the count piece has no rectangle until the game can measure it")
+	db.mwOn = false
+	for _, fn in ipairs(ns.moveProviders) do for _, pc in ipairs(fn()) do if pc.id == "maelstrom" then check(not pc.on(), "maelstrom: off - nothing to move") end end end
+	reset()
+
+	-- ---------------------------------------------------------- the settings page
+	check(ns.categories.mw ~= nil and page ~= nil and page.name == "Maelstrom", "maelstrom settings: a Maelstrom page is registered (the seventh)")
+	for _, key in ipairs({ "mwOn", "mwAlways", "mwCount", "mwGlow", "mwErrorLog" }) do check(boxFor(key) ~= nil, "maelstrom settings: a box for " .. key) end
+	page.OnRefresh()
+	local onBox = boxFor("mwOn")
+	check(onBox.checked == false, "maelstrom settings: the switch shows off")
+	onBox.scripts.OnClick(onBox)
+	onBox.checked = true; onBox.scripts.OnClick(onBox)
+	check(db.mwOn == true, "maelstrom settings: ticking it turns the module on")
+	check(page.scripts.OnShow ~= nil, "maelstrom settings: page shows")
+	page.scripts.OnShow()
+	check(ns.optionsOpen == true and mwBar().shown == true, "maelstrom settings: opening the page shows the bar with a sample")
+	local radios = {}
+	for _, f in ipairs(frames) do if (f.value == "top" or f.value == "center" or f.value == "bottom") and f.scripts.OnClick and f.parentFrame == page then radios[f.value] = f end end
+	check(radios.top and radios.center and radios.bottom, "maelstrom settings: three count positions")
+	radios.bottom.scripts.OnClick(radios.bottom)
+	check(db.mwCountPos == "bottom", "maelstrom settings: choosing 'Below'")
+	-- the colour swatches
+	local swatches = {}
+	for _, f in ipairs(frames) do if f.kind == "Button" and f.parentFrame == page and f.refresh and f.scripts.OnClick and not f.tmpl then swatches[#swatches + 1] = f end end
+	check(#swatches == 4, "maelstrom settings: four colour swatches (" .. #swatches .. ")")
+	local picker
+	ColorPickerFrame = { SetupColorPickerAndShow = function(_, info) picker = info end, GetColorRGB = function() return 0.9, 0.8, 0.7 end }
+	swatches[2].scripts.OnClick(swatches[2])
+	check(picker and picker.r == 0.55 and picker.g == 0.95, "maelstrom settings: a swatch opens the picker at its colour")
+	picker.swatchFunc()
+	check(db.mwColorFull[1] == 0.9 and db.mwColorFull[3] == 0.7 and ns.defaults.mwColorFull[1] == 0.55, "maelstrom settings: choosing a colour saves a new table")
+	picker.cancelFunc()
+	check(db.mwColorFull[1] == 0.55 and db.mwColorFull[2] == 0.95, "maelstrom settings: cancelling puts the old colour back")
+	swatches[4].scripts.OnClick(swatches[4]); picker.swatchFunc()
+	check(db.mwColorGlow[1] == 0.9, "maelstrom settings: the glow colour")
+	ColorPickerFrame = { hasOpacity = true, SetColorRGB = function() end, GetColorRGB = function() return 0.1, 0.2, 0.3 end, Hide = function() end, Show = function() end }
+	swatches[1].scripts.OnClick(swatches[1]); ColorPickerFrame.swatchFunc()
+	check(db.mwColor[1] == 0.1, "maelstrom settings: the older picker works too")
+	ColorPickerFrame = nil
+	-- the edit boxes
+	local boxes = {}
+	for _, f in ipairs(frames) do if f.kind == "EditBox" and f.parentFrame == page then boxes[#boxes + 1] = f end end
+	check(#boxes == 2, "maelstrom settings: two text boxes, the glow spell and the buff name")
+	boxes[1].SetText = function(self, v) self.text = v end
+	boxes[1].GetText = function(self) return self.text end
+	boxes[1].text = "Chain Lightning"; boxes[1].scripts.OnEnterPressed(boxes[1])
+	check(db.mwGlowSpell == "Chain Lightning", "maelstrom settings: a glow spell typed in")
+	boxes[1].text = ""; boxes[1].scripts.OnEnterPressed(boxes[1])
+	check(db.mwGlowSpell == nil, "maelstrom settings: emptied - Lightning Bolt again")
+	boxes[2].GetText = function(self) return self.text end
+	boxes[2].text = "Maelstrom Weapon X"; boxes[2].scripts.OnEnterPressed(boxes[2])
+	check(db.mwAura == "Maelstrom Weapon X", "maelstrom settings: a buff name typed in")
+	db.mwAura = nil
+	-- sliders and test buttons
+	local sl = {}
+	for _, f in ipairs(frames) do if f.kind == "Slider" and f.parentFrame == page then sl[#sl + 1] = f end end
+	check(#sl == 6, "maelstrom settings: six sliders - width, height, spacing, scale, count left/right, count up/down (" .. #sl .. ")")
+	sl[1].scripts.OnValueChanged(sl[1], 50)
+	check(db.mwW == 50 and mwBar().w == 5 * 50 + 4 * 3, "maelstrom settings: the width slider resizes the bar")
+	sl[4].scripts.OnValueChanged(sl[4], 175)
+	check(db.mwScale == 175, "maelstrom settings: the scale slider is a percent")
+	local tb = {}
+	for _, f in ipairs(frames) do if f.kind == "Button" and f.parentFrame == page and f.text and f.tmpl == "UIPanelButtonTemplate" then tb[f.text] = f end end
+	check(tb["3 stacks"] and tb["5 stacks"] and tb["Stop"], "maelstrom settings: test buttons")
+	tb["5 stacks"].scripts.OnClick(); check(S.test == 5, "maelstrom settings: 5 stacks")
+	tb["Stop"].scripts.OnClick(); check(S.test == nil, "maelstrom settings: Stop")
+	-- the error-log tick box goes through its own setter
+	local eb = boxFor("mwErrorLog")
+	local sh, gh = seterrorhandler, geterrorhandler
+	function geterrorhandler() return function() end end
+	function seterrorhandler() end
+	S.errHooked = nil; eb.checked = true; eb.scripts.OnClick(eb)
+	check(db.mwErrorLog == true and S.errHooked == true, "maelstrom settings: the error-recorder box installs it")
+	seterrorhandler, geterrorhandler = sh, gh
+	db.mwErrorLog = false
+	-- the status text follows the layer
+	page.OnRefresh()
+	-- defaults: only its own, and every key of the page
+	db.mwOn, db.mwW, db.mwColor, db.mwGlowSpell, db.mwFrames, db.mwErrorLog, db.mwX = true, 70, { 1, 1, 1 }, "x", { "y" }, true, 99
+	local other_ = db.size
+	page.OnDefault()
+	check(db.mwOn == false and db.mwW == 28 and db.mwColor[2] == 0.55 and db.mwGlowSpell == nil and db.mwFrames == nil and db.mwErrorLog == false and db.mwX == 0, "maelstrom settings: Defaults resets every key of the page")
+	check(db.size == other_, "maelstrom settings: ...and nothing of the others")
+	page.scripts.OnHide()
+	-- the home page has a button
+	local homeBtn
+	for _, f in ipairs(frames) do if f.kind == "Button" and f.text == "Maelstrom" and f.parentFrame == savedCat.pages[1] then homeBtn = f end end
+	check(homeBtn ~= nil, "maelstrom settings: a Maelstrom button on the home page")
+	savedCat.opened = nil; homeBtn.scripts.OnClick()
+	check(savedCat.opened == ns.categories.mw:GetID(), "maelstrom settings: ...that opens the page")
+	-- the events are the ones the module registered, one at a time
+	check(mf.registered.PLAYER_REGEN_ENABLED and mf.registered.ACTIONBAR_SLOT_CHANGED and mf.registered.UPDATE_BONUS_ACTIONBAR and mf.registered.UNIT_AURA, "maelstrom: its events are registered")
+	reset()
+	noErrors("maelstrom: nothing raised an error in the log")
+end
+
 -- what ships: the author's own layout (a fresh install gets this; saved settings are never overwritten)
 do
 	local want = {
@@ -4297,6 +4832,8 @@ do
 		callOn = false, callTotemic = true, callRecall = false, callShow = "bar", callScale = 55, callSide = "right", callAnchor = "bar", callAlign = "start", callChoice = 0,
 		posCallOwn = true, posCallSide = "left", posCallAlign = "start", posTotemicOwn = true, posTotemicSide = "top", posTotemicAlign = "center",
 		posRecallOwn = true, posRecallSide = "right", posRecallAlign = "start", showAdvanced = false, buffBadge = true,
+		mwOn = false, mwAlways = false, mwCount = false, mwCountPos = "top", mwW = 28, mwH = 22, mwGap = 3, mwScale = 100, mwGlow = true, mwErrorLog = false,
+		mwPoint = "CENTER", mwRelPoint = "CENTER", mwX = 0, mwY = -150,
 	}
 	local bad = {}
 	for k, v in pairs(want) do if SHIPPED[k] ~= v then bad[#bad + 1] = k .. "=" .. tostring(SHIPPED[k]) end end

@@ -1763,6 +1763,7 @@ end
 
 function ns.updatePreview()
 	if ns.cureApply then ns.cureApply() end
+	if ns.mwApply then ns.mwApply() end
 	if ns.callApply then ns.callApply() end
 	applyAttach()
 	applyBarMouse()
@@ -1790,6 +1791,7 @@ function ns.resetPosition()
 	applyAttach()
 	ns.resetAuxPlace()
 	if ns.cureResetPosition then ns.cureResetPosition() end
+	if ns.mwResetPosition then ns.mwResetPosition() end
 end
 
 function ns.get() return db end
@@ -1954,6 +1956,7 @@ ev:SetScript("OnEvent", guard("event", function(self, event, arg1, ...)
 		fixReserve()
 		fixHold()
 		if ns.cureInit then ns.cureInit() end        -- the Cures module (Cures.lua) starts with the saved settings in
+		if ns.mwInit then ns.mwInit() end            -- and the Maelstrom module (Maelstrom.lua)
 		self:UnregisterEvent("ADDON_LOADED")
 		if InCombatLockdown() then
 			-- secure buttons can't be made in combat: build when it ends
@@ -2065,9 +2068,12 @@ SLASH_SHAMANKIT2 = "/totemrange"   -- the name this addon had before ShamanKit
 SLASH_SHAMANKIT3 = "/trange"
 SlashCmdList.SHAMANKIT = function(msg)
 	local rest
+	local raw = (msg or ""):match("^%s*%S+%s*(.-)%s*$") or ""     -- what follows the first word, case kept (frame names)
 	msg, rest = (msg or ""):lower():match("^%s*(%S*)%s*(.-)%s*$")
 	if msg == "cures" or msg == "cure" then
 		if ns.cureSlash then ns.cureSlash(rest) end
+	elseif msg == "mw" or msg == "maelstrom" then
+		if ns.mwSlash then ns.mwSlash(raw) end
 	elseif msg == "unlock" or msg == "lock" then
 		db.locked = msg == "lock"
 		ns.updatePreview()
@@ -2097,7 +2103,8 @@ SlashCmdList.SHAMANKIT = function(msg)
 		print("|cff33ff99ShamanKit|r shield icon: " .. ns.boxInfo())
 		if ns.callInfo then for _, line in ipairs(ns.callInfo()) do print("|cff33ff99ShamanKit|r calls: " .. line) end end
 		if ns.badgeInfo then for _, line in ipairs(ns.badgeInfo()) do print("|cff33ff99ShamanKit|r " .. line) end end
+		if ns.mwInfo then for _, line in ipairs(ns.mwInfo()) do print("|cff33ff99ShamanKit|r maelstrom: " .. line) end end
 	elseif ns.openOptions then
-		ns.openOptions(msg)   -- "bar", "totems" or "buffs" open that page
+		ns.openOptions(msg)   -- "bar", "totems", "buffs", "cures", "calls" or "mw" open that page
 	end
 end
